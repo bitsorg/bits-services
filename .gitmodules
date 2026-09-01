@@ -1,0 +1,3 @@
+[submodule "ali-bot"]
+	path = ali-bot
+	url = https://github.com/alisw/ali-bot
