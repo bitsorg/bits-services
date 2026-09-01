@@ -52,6 +52,40 @@ services:
       retries: 3
       start_period: 10s
 
+  # ─── Phase 3 (Stage B): the relying-party backend ──────────────────────────
+  # Faces the browser (behind web.cern.ch on services-net) and is the ONLY client
+  # of the security-proxy (signer-net). Holds no key. Built from the vendored
+  # `bits` submodule (console-backend/ + bits_helpers/).
+  bits-console-backend:
+    build:
+      # Context is the bits submodule (BuildKit gitlink reason); Dockerfile is
+      # outside it, same as the security-proxy service.
+      context: bits
+      dockerfile: ../bits-console-backend/Dockerfile
+    image: bits-services/bits-console-backend:local
+    restart: unless-stopped
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      # Wired in B3; empty is fine for the skeleton.
+      BITS_SIGN_PROXY_URL: "${BITS_SIGN_PROXY_URL:-}"
+      GITLAB_API_URL: "${GITLAB_API_URL:-}"
+    networks:
+      - signer-net
+      - services-net
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    # No host port by default — web.cern.ch reverse-proxies to it on services-net.
+    # Add a ports: mapping only to front it directly during local dev.
+
 networks:
   # Internal-only: the signer. No external connectivity in or out; only the
   # bits-console backend is also attached here (Phase 3).

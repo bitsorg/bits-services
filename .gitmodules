@@ -1,3 +1,6 @@
 [submodule "ali-bot"]
 	path = ali-bot
 	url = https://github.com/alisw/ali-bot
+[submodule "bits"]
+	path = bits
+	url = https://github.com/bitsorg/bits
