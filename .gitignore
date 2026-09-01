@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+# Runtime secrets and local state — never commit.
+.env
+*.env
+!.env.example
+
+# Key material must NEVER be committed. The signing key lives only in the
+# running proxy's memory (pushed over its ingest socket), never on disk here.
+secrets/
+*.key
+*.pem
+
+# Build / runtime scratch.
+venv/
+.make/
+__pycache__/
+*.pyc
+
+# Editor / OS artefacts.
+.DS_Store
+*.swp
+*~

@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# bits-services — persistent supporting services.
+#
+# Services are added per implementation-plan phase:
+#   Phase 1: security-proxy        (the signer; internal network only)
+#   Phase 3: bits-console backend  (relying party; only client of the proxy)
+#   Phase 4: monitoring            (extracted from cvmfs-testbed)
+#
+# Networks are declared now so each service attaches to the right isolated
+# segment when it lands. The signer sits on an internal-only network reachable
+# solely by the backend; nothing else may talk to it.
+
+services: {}
+# security-proxy, backend and monitoring services are defined from Phase 1 on.
+
+networks:
+  # Internal-only: the signer. No external connectivity in or out; only the
+  # bits-console backend is also attached here (Phase 3).
+  signer-net:
+    driver: bridge
+    internal: true
+  # Backend <-> public front (web.cern.ch reverse-proxy) and monitoring scrape.
+  services-net:
+    driver: bridge
