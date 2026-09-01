@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+# Keep the build context small and keep secrets out of it. The security-proxy
+# image only needs ali-bot/security-proxy/; everything else is excluded.
+.git
+.env
+*.env
+!.env.example
+.make/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Vendored ali-bot: ship only the security-proxy subdir to the build.
+ali-bot/*
+!ali-bot/security-proxy
