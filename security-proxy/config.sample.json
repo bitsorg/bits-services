@@ -1,0 +1,15 @@
+{
+  "_comment": "bits manifest signer — sign-only proxy config. Copy to the host SECURITY_PROXY_CONFIG_DIR as config.json. Holds NO key: the Ed25519 seed is pushed over the ingest socket into the 'bits-sign-key' slot and kept in memory. 'cert' is a never-provisioned ingest slot: the daemon requires a credential of some kind even for a sign-only config, so this satisfies that check without putting any cert on disk (it stays 503/unused; the local sign route needs no TLS). host=0.0.0.0 binds all interfaces; the backend (Phase 3) reaches the proxy by the docker service name 'security-proxy' + the advertised port, NOT the advertised host (which is loopback for a wildcard bind).",
+  "host": "0.0.0.0",
+  "cert": {"ingest": "no-tls-sign-only"},
+  "agent_socket": "/run/security-proxy/agent.sock",
+  "ingest_socket": "/run/security-proxy/ingest.sock",
+  "secret_rotation_seconds": 86400,
+  "routes": [
+    {
+      "name": "bits-manifest-sign",
+      "prefix": "/sign/bits",
+      "sign": {"key": {"ingest": "bits-sign-key"}}
+    }
+  ]
+}

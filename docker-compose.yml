@@ -10,8 +10,38 @@
 # segment when it lands. The signer sits on an internal-only network reachable
 # solely by the backend; nothing else may talk to it.
 
-services: {}
-# security-proxy, backend and monitoring services are defined from Phase 1 on.
+services:
+  # ─── Phase 1: the manifest signer ──────────────────────────────────────────
+  # Reachable ONLY on signer-net, by the bits-console backend (Phase 3). No
+  # published ports. No key baked or mounted — the Ed25519 seed is pushed over
+  # the ingest socket at runtime and held only in memory.
+  security-proxy:
+    build:
+      context: .
+      dockerfile: security-proxy/Dockerfile
+    image: bits-services/security-proxy:local
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      # Root-owned config (from security-proxy/config.sample.json), read-only.
+      - ${SECURITY_PROXY_CONFIG_DIR:?set SECURITY_PROXY_CONFIG_DIR in .env}:/etc/security-proxy:ro
+      # Agent + ingest sockets on a named volume (inherits the image's
+      # securityproxy ownership); the backend shares this volume in Phase 3.
+      - signer-sockets:/run/security-proxy
+    networks:
+      - signer-net
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/security-proxy/agent.sock"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
 networks:
   # Internal-only: the signer. No external connectivity in or out; only the
@@ -22,3 +52,7 @@ networks:
   # Backend <-> public front (web.cern.ch reverse-proxy) and monitoring scrape.
   services-net:
     driver: bridge
+
+volumes:
+  # Agent + ingest UNIX sockets for the signer; shared with the backend (Phase 3).
+  signer-sockets:
