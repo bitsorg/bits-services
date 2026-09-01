@@ -68,5 +68,6 @@ container, against the ingest/agent sockets on the named volume:
 Expected: `401` without the token, `503` before step 1 (slot unprovisioned), and
 `OK: signature verifies` after. This is the known-good target Phase 2 automates.
 
-> Note: these commands are authored but **not yet run on the host** — running
-> containers on the bits host is a separate approval gate.
+> **Verified on the bits host (Phase 1e):** `make build` → `make up` → push →
+> sign → verify passes end-to-end with a throwaway key
+> (`OK: signature verifies`). The production key is never used for this check.
