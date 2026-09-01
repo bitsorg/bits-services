@@ -10,9 +10,13 @@
 # is a later hardening step. Wheels are fetched from PyPI into THIS image only
 # (reproducible at the direct-pin level), never onto the host.
 
+# Build context is the submodule itself (ali-bot/security-proxy), set in
+# docker-compose.yml — BuildKit omits a git submodule's files when the context
+# root is the PARENT repo (the gitlink reads as empty), so we root the context
+# inside it and COPY its whole (small) tree.
 FROM python:3.12-slim AS build
 WORKDIR /src
-COPY ali-bot/security-proxy/ /src/
+COPY . /src/
 RUN python -m venv /opt/security-proxy/venv \
  && /opt/security-proxy/venv/bin/pip install --no-cache-dir --upgrade pip \
  && /opt/security-proxy/venv/bin/pip install --no-cache-dir .

@@ -17,8 +17,12 @@ services:
   # the ingest socket at runtime and held only in memory.
   security-proxy:
     build:
-      context: .
-      dockerfile: security-proxy/Dockerfile
+      # Context is the submodule itself, not the repo root: BuildKit omits a git
+      # submodule's files when the context root is the parent repo (the gitlink
+      # reads as empty). The Dockerfile lives outside that context, which compose
+      # + BuildKit allow.
+      context: ali-bot/security-proxy
+      dockerfile: ../../security-proxy/Dockerfile
     image: bits-services/security-proxy:local
     restart: unless-stopped
     read_only: true
