@@ -32,6 +32,11 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    # Keep the in-memory key off disk: no core dump can write it out, and don't
+    # swap the proxy's anon pages (belt-and-suspenders with swapoff -a on the VM).
+    ulimits:
+      core: 0
+    mem_swappiness: 0
     volumes:
       # Root-owned config (from security-proxy/config.sample.json), read-only.
       - ${SECURITY_PROXY_CONFIG_DIR:?set SECURITY_PROXY_CONFIG_DIR in .env}:/etc/security-proxy:ro
