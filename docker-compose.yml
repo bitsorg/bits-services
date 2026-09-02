@@ -67,7 +67,9 @@ services:
         FROM python:3.12-slim
         WORKDIR /app
         COPY . /src
-        ENV PYTHONPATH=/src PYTHONDONTWRITEBYTECODE=1
+        # Run console_backend from source (so its static/ PWA ships) with
+        # bits_helpers on the path; pip install brings only the deps.
+        ENV PYTHONPATH=/src:/src/console-backend PYTHONDONTWRITEBYTECODE=1
         RUN pip install --no-cache-dir /src/console-backend cryptography pyyaml requests
         USER nobody
         EXPOSE 8080
@@ -81,9 +83,25 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
-      # Wired in B3; empty is fine for the skeleton.
+      # Signing (B3)
       BITS_SIGN_PROXY_URL: "${BITS_SIGN_PROXY_URL:-}"
+      BITS_SIGN_PROXY_TOKEN: "${BITS_SIGN_PROXY_TOKEN:-}"
+      # Identity + authz (B2/B2b)
       GITLAB_API_URL: "${GITLAB_API_URL:-}"
+      BITS_OIDC_AUTHORIZE_URL: "${BITS_OIDC_AUTHORIZE_URL:-}"
+      BITS_OIDC_TOKEN_URL: "${BITS_OIDC_TOKEN_URL:-}"
+      BITS_CONSOLE_OIDC_CLIENT_ID: "${BITS_CONSOLE_OIDC_CLIENT_ID:-}"
+      BITS_CONSOLE_OIDC_CLIENT_SECRET: "${BITS_CONSOLE_OIDC_CLIENT_SECRET:-}"
+      BITS_OIDC_REDIRECT_URI: "${BITS_OIDC_REDIRECT_URI:-}"
+      BITS_OIDC_SCOPES: "${BITS_OIDC_SCOPES:-read_api}"
+      BITS_SESSION_COOKIE_SECURE: "${BITS_SESSION_COOKIE_SECURE:-1}"
+      BITS_ADMINS_POLICY: "${BITS_ADMINS_POLICY:-}"
+      BITS_ADMIN_RESOLVE_TOKEN: "${BITS_ADMIN_RESOLVE_TOKEN:-}"
+      # CI identity (B4)
+      BITS_OIDC_ISSUER: "${BITS_OIDC_ISSUER:-}"
+      BITS_OIDC_CI_AUDIENCE: "${BITS_OIDC_CI_AUDIENCE:-}"
+      BITS_OIDC_JWKS_URL: "${BITS_OIDC_JWKS_URL:-}"
+      BITS_CI_SIGNERS: "${BITS_CI_SIGNERS:-}"
     networks:
       - signer-net
       - services-net
