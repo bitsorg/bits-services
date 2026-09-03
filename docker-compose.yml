@@ -53,27 +53,27 @@ services:
       start_period: 10s
 
   # ─── Phase 3 (Stage B): the relying-party backend ──────────────────────────
-  # Faces the browser (behind web.cern.ch on services-net) and is the ONLY client
-  # of the security-proxy (signer-net). Holds no key. Built from the vendored
-  # `bits` submodule (console-backend/ + bits_helpers/).
+  # Its OWN origin (e.g. https://bits.cern.ch): the browser on the GitLab Pages
+  # frontend (bits-console.web.cern.ch) calls it cross-origin. It is the ONLY
+  # client of the security-proxy (signer-net) and holds no key. Built from the
+  # local `bits` checkout (console-backend/ + bits_helpers/).
   bits-console-backend:
     build:
-      # Built from your LOCAL bits checkout (BITS_SRC, default ../bits) — it holds
-      # console-backend/ + bits_helpers/. A submodule can't be used here: the
-      # console-backend code is local and unpushed, so a remote clone lacks it.
-      # Dockerfile is inline to avoid outside-context path issues.
+      # Built from your LOCAL bits checkout (BITS_SRC, default ../bits) — a
+      # submodule can't be used here (the console-backend code is local/unpushed).
       context: ${BITS_SRC:-../bits}
       dockerfile_inline: |
         FROM python:3.12-slim
         WORKDIR /app
         COPY . /src
-        # Run console_backend from source (so its static/ PWA ships) with
-        # bits_helpers on the path; pip install brings only the deps.
         ENV PYTHONPATH=/src:/src/console-backend PYTHONDONTWRITEBYTECODE=1
         RUN pip install --no-cache-dir /src/console-backend cryptography pyyaml requests
+        # /data (persistent passkey store) must be writable by the runtime user; a
+        # fresh named volume mounted here inherits this ownership.
+        RUN install -d -o nobody -g nogroup /data
         USER nobody
-        EXPOSE 8080
-        CMD ["uvicorn", "console_backend.main:app", "--host", "0.0.0.0", "--port", "8080"]
+        EXPOSE 8443
+        CMD ["uvicorn","console_backend.main:app","--host","0.0.0.0","--port","8443","--ssl-keyfile","/certs/key.pem","--ssl-certfile","/certs/cert.pem"]
     image: bits-services/bits-console-backend:local
     restart: unless-stopped
     tmpfs:
@@ -83,36 +83,41 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
-      # Signing (B3)
+      # Signing proxy — wired by `make unlock` once the proxy is up (URL + gate
+      # token only exist then, and change on a proxy restart).
       BITS_SIGN_PROXY_URL: "${BITS_SIGN_PROXY_URL:-}"
       BITS_SIGN_PROXY_TOKEN: "${BITS_SIGN_PROXY_TOKEN:-}"
-      # Identity + authz (B2/B2b)
+      # Identity (verifies the browser's GitLab token via GET /user) + CORS.
       GITLAB_API_URL: "${GITLAB_API_URL:-}"
-      BITS_OIDC_AUTHORIZE_URL: "${BITS_OIDC_AUTHORIZE_URL:-}"
-      BITS_OIDC_TOKEN_URL: "${BITS_OIDC_TOKEN_URL:-}"
-      BITS_CONSOLE_OIDC_CLIENT_ID: "${BITS_CONSOLE_OIDC_CLIENT_ID:-}"
-      BITS_CONSOLE_OIDC_CLIENT_SECRET: "${BITS_CONSOLE_OIDC_CLIENT_SECRET:-}"
-      BITS_OIDC_REDIRECT_URI: "${BITS_OIDC_REDIRECT_URI:-}"
-      BITS_OIDC_SCOPES: "${BITS_OIDC_SCOPES:-read_api}"
-      BITS_SESSION_COOKIE_SECURE: "${BITS_SESSION_COOKIE_SECURE:-1}"
+      BITS_FRONTEND_ORIGIN: "${BITS_FRONTEND_ORIGIN:-}"
       BITS_ADMINS_POLICY: "${BITS_ADMINS_POLICY:-}"
       BITS_ADMIN_RESOLVE_TOKEN: "${BITS_ADMIN_RESOLVE_TOKEN:-}"
-      # CI identity (B4)
+      # WebAuthn — the FRONTEND host (the passkey ceremony runs on the Pages page).
+      BITS_WEBAUTHN_RP_ID: "${BITS_WEBAUTHN_RP_ID:-}"
+      BITS_WEBAUTHN_ORIGIN: "${BITS_WEBAUTHN_ORIGIN:-}"
+      BITS_WEBAUTHN_CREDENTIALS: "${BITS_WEBAUTHN_CREDENTIALS:-/data/creds.json}"
+      BITS_WEBAUTHN_REQUIRE_UV: "${BITS_WEBAUTHN_REQUIRE_UV:-1}"
+      BITS_ENROLLMENT_AUTHORITY: "${BITS_ENROLLMENT_AUTHORITY:-1}"
+      BITS_WEBAUTHN_REQUIRED: "${BITS_WEBAUTHN_REQUIRED:-0}"
+      # CI identity (optional; for automated signing later).
       BITS_OIDC_ISSUER: "${BITS_OIDC_ISSUER:-}"
       BITS_OIDC_CI_AUDIENCE: "${BITS_OIDC_CI_AUDIENCE:-}"
       BITS_OIDC_JWKS_URL: "${BITS_OIDC_JWKS_URL:-}"
       BITS_CI_SIGNERS: "${BITS_CI_SIGNERS:-}"
+    ports:
+      - "443:8443"          # https on the backend's own origin
+    volumes:
+      - webauthn-creds:/data                                   # persistent passkeys
+      - ${TLS_CERT_DIR:?set TLS_CERT_DIR in .env}:/certs:ro    # cert.pem + key.pem
     networks:
       - signer-net
       - services-net
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      test: ["CMD", "python3", "-c", "import ssl,urllib.request; urllib.request.urlopen('https://127.0.0.1:8443/healthz', context=ssl._create_unverified_context())"]
       interval: 30s
       timeout: 3s
       retries: 3
       start_period: 15s
-    # No host port by default — web.cern.ch reverse-proxies to it on services-net.
-    # Add a ports: mapping only to front it directly during local dev.
 
 networks:
   # Internal-only: the signer. No external connectivity in or out; only the
@@ -127,3 +132,5 @@ networks:
 volumes:
   # Agent + ingest UNIX sockets for the signer; shared with the backend (Phase 3).
   signer-sockets:
+  # Persistent WebAuthn passkey store for the backend (survives restarts).
+  webauthn-creds:

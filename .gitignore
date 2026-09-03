@@ -20,3 +20,6 @@ __pycache__/
 .DS_Store
 *.swp
 *~
+
+# generated proxy config dir (from make init)
+config/
