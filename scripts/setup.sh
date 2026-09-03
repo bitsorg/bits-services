@@ -74,12 +74,19 @@ elif command -v openssl >/dev/null 2>&1; then
   if openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
        -keyout "$TLS_CERT_DIR/key.pem" -out "$TLS_CERT_DIR/cert.pem" \
        -subj "/CN=$BACKEND_HOST" -addext "subjectAltName=DNS:$BACKEND_HOST" >/dev/null 2>&1; then
-    # The backend container runs as `nobody` (a different uid than the host owner),
-    # so a bind-mounted key MUST be world-readable or it can't load it (uvicorn
-    # PermissionError). Acceptable for a self-signed TEST cert; for a real key, run
-    # the container as a user matching the key's owner or use a secrets mechanism.
-    chmod 644 "$TLS_CERT_DIR/cert.pem" "$TLS_CERT_DIR/key.pem"
-    success "wrote $TLS_CERT_DIR/{cert,key}.pem (0644 so the backend user can read them)"
+    chmod 644 "$TLS_CERT_DIR/cert.pem"   # public cert
+    chmod 600 "$TLS_CERT_DIR/key.pem"
+    # The backend container runs as `nobody` (uid 65534), a different uid than the
+    # host owner, so it can't read a 600 key the host user owns. Prefer to chown the
+    # key to 65534 (needs sudo) so ONLY the backend user + root can read it — keeping
+    # it non-world-readable. Fall back to a world-readable key (0644) for a
+    # self-signed TEST cert if sudo/chown isn't available.
+    if sudo chown 65534:65534 "$TLS_CERT_DIR/key.pem"; then
+      success "wrote $TLS_CERT_DIR/{cert,key}.pem (key owned by backend user 65534, mode 600)"
+    else
+      chmod 644 "$TLS_CERT_DIR/key.pem"
+      warn "no sudo/chown — key.pem left world-readable (0644); OK for a self-signed test cert."
+    fi
     warn "self-signed: fine when a CERN front RE-ENCRYPTS to the backend."
     warn "if the browser reaches the backend directly, replace with a browser-trusted cert."
   else
