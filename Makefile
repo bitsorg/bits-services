@@ -6,7 +6,7 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help init config build up down ps logs unlock test clean
+.PHONY: help init config build up down ps status logs unlock test clean
 
 help:  ## Print this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -27,8 +27,11 @@ up:  ## Start services (detached)
 down:  ## Stop services
 	$(COMPOSE) down
 
-ps:  ## Show service status
+ps:  ## Show service status (compose ps)
 	$(COMPOSE) ps
+
+status:  ## At-a-glance: containers + config + cert + health (+ backend logs if down)
+	@bash scripts/status.sh
 
 logs:  ## Tail service logs
 	$(COMPOSE) logs -f --tail=100
