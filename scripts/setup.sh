@@ -64,6 +64,19 @@ BITS_WEBAUTHN_ORIGINS="$FRONTEND_ORIGIN,https://$BACKEND_HOST"
 _fe_host="$(printf '%s' "$FRONTEND_ORIGIN" | sed -E 's#^https?://([^/:]+).*#\1#')"
 _rp_default="$(printf '%s' "$_fe_host" | awk -F. '{n=NF; if(n>=2) print $(n-1)"."$n; else print $0}')"
 _ask BITS_WEBAUTHN_RP_ID "WebAuthn rp_id (parent domain of both origins)" "$_rp_default"
+# rp_id MUST be a registrable suffix of BOTH origin hosts, or the passkey works on
+# one origin and fails on the other with "RPID did not match the origin". Re-prompt
+# until valid — this catches a stale per-host value kept from a previous .env.
+_is_suffix() {   # is $1 equal to, or a parent domain of, $2 ?
+  [ "$1" = "$2" ] && return 0
+  case "$2" in *".$1") return 0 ;; esac
+  return 1
+}
+while ! { _is_suffix "$BITS_WEBAUTHN_RP_ID" "$_fe_host" && _is_suffix "$BITS_WEBAUTHN_RP_ID" "$BACKEND_HOST"; }; do
+  warn "rp_id '$BITS_WEBAUTHN_RP_ID' must be a parent of BOTH $_fe_host and $BACKEND_HOST (e.g. $_rp_default)."
+  BITS_WEBAUTHN_RP_ID=""   # clear so the prompt doesn't re-offer the bad saved value
+  _ask BITS_WEBAUTHN_RP_ID "WebAuthn rp_id (parent of both origins)" "$_rp_default"
+done
 
 # ── Security-proxy config ─────────────────────────────────────────────────────
 install -d "$SECURITY_PROXY_CONFIG_DIR"
