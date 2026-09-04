@@ -51,10 +51,19 @@ _ask SECURITY_PROXY_CONFIG_DIR "Security-proxy config dir"        "$DIR/config/s
 _ask TLS_CERT_DIR            "Backend TLS cert dir"               "$DIR/secrets/tls"
 _ask BITS_SRC                "Local bits checkout"                "../bits"
 
-# ── Derive WebAuthn + CORS from the frontend origin ───────────────────────────
+# ── Derive WebAuthn + CORS ────────────────────────────────────────────────────
+# The passkey ceremony runs on TWO origins: enrolment on the Pages frontend, and
+# cross-device approval on the backend's OWN page (no SSO). rp_id must therefore be
+# a registrable PARENT of both (e.g. cern.ch), and both origins are accepted at
+# verification. A per-host rp_id would tie the passkey to one origin only.
 BITS_FRONTEND_ORIGIN="$FRONTEND_ORIGIN"
 BITS_WEBAUTHN_ORIGIN="$FRONTEND_ORIGIN"
-BITS_WEBAUTHN_RP_ID="$(printf '%s' "$FRONTEND_ORIGIN" | sed -E 's#^https?://([^/:]+).*#\1#')"
+BITS_WEBAUTHN_ORIGINS="$FRONTEND_ORIGIN,https://$BACKEND_HOST"
+# Default rp_id = the last two labels of the frontend host (bits-console.web.cern.ch
+# -> cern.ch); prompt so it can be overridden. It must be a suffix of both origins.
+_fe_host="$(printf '%s' "$FRONTEND_ORIGIN" | sed -E 's#^https?://([^/:]+).*#\1#')"
+_rp_default="$(printf '%s' "$_fe_host" | awk -F. '{n=NF; if(n>=2) print $(n-1)"."$n; else print $0}')"
+_ask BITS_WEBAUTHN_RP_ID "WebAuthn rp_id (parent domain of both origins)" "$_rp_default"
 
 # ── Security-proxy config ─────────────────────────────────────────────────────
 install -d "$SECURITY_PROXY_CONFIG_DIR"
@@ -125,6 +134,7 @@ fi
   echo "BITS_ADMIN_RESOLVE_TOKEN='${BITS_ADMIN_RESOLVE_TOKEN:-}'"
   echo "BITS_WEBAUTHN_RP_ID='${BITS_WEBAUTHN_RP_ID}'"
   echo "BITS_WEBAUTHN_ORIGIN='${BITS_WEBAUTHN_ORIGIN}'"
+  echo "BITS_WEBAUTHN_ORIGINS='${BITS_WEBAUTHN_ORIGINS}'"
   echo "BITS_WEBAUTHN_CREDENTIALS='${BITS_WEBAUTHN_CREDENTIALS:-/data/creds.json}'"
   echo "BITS_WEBAUTHN_REQUIRE_UV='${BITS_WEBAUTHN_REQUIRE_UV:-1}'"
   echo "BITS_ENROLLMENT_AUTHORITY='${BITS_ENROLLMENT_AUTHORITY:-1}'"

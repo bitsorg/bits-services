@@ -92,9 +92,13 @@ services:
       BITS_FRONTEND_ORIGIN: "${BITS_FRONTEND_ORIGIN:-}"
       BITS_ADMINS_POLICY: "${BITS_ADMINS_POLICY:-}"
       BITS_ADMIN_RESOLVE_TOKEN: "${BITS_ADMIN_RESOLVE_TOKEN:-}"
-      # WebAuthn — the FRONTEND host (the passkey ceremony runs on the Pages page).
+      # WebAuthn. rp_id is a shared parent (e.g. cern.ch) so one passkey works for
+      # enrolment on the Pages frontend AND approval on this backend's own page;
+      # both origins are accepted at verification (BITS_WEBAUTHN_ORIGINS must list
+      # the backend origin, since the approve page runs there).
       BITS_WEBAUTHN_RP_ID: "${BITS_WEBAUTHN_RP_ID:-}"
       BITS_WEBAUTHN_ORIGIN: "${BITS_WEBAUTHN_ORIGIN:-}"
+      BITS_WEBAUTHN_ORIGINS: "${BITS_WEBAUTHN_ORIGINS:-}"
       BITS_WEBAUTHN_CREDENTIALS: "${BITS_WEBAUTHN_CREDENTIALS:-/data/creds.json}"
       BITS_WEBAUTHN_REQUIRE_UV: "${BITS_WEBAUTHN_REQUIRE_UV:-1}"
       BITS_ENROLLMENT_AUTHORITY: "${BITS_ENROLLMENT_AUTHORITY:-1}"
