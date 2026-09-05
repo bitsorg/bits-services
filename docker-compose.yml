@@ -92,6 +92,14 @@ services:
       BITS_FRONTEND_ORIGIN: "${BITS_FRONTEND_ORIGIN:-}"
       BITS_ADMINS_POLICY: "${BITS_ADMINS_POLICY:-}"
       BITS_ADMIN_RESOLVE_TOKEN: "${BITS_ADMIN_RESOLVE_TOKEN:-}"
+      # Ops proxy (Phase 1): api-scope project token + the build project id, so the
+      # backend can trigger builds on the caller's behalf after authz. Env for now.
+      BITS_FORGE_OPS_TOKEN: "${BITS_FORGE_OPS_TOKEN:-}"
+      BITS_FORGE_PROJECT: "${BITS_FORGE_PROJECT:-}"
+      BITS_FORGE_REFS: "${BITS_FORGE_REFS:-main}"
+      BITS_CATALOG_OWNERS: "${BITS_CATALOG_OWNERS:-}"
+      BITS_CATALOG_TTL: "${BITS_CATALOG_TTL:-300}"
+      BITS_GITHUB_TOKEN: "${BITS_GITHUB_TOKEN:-}"
       # WebAuthn. rp_id is a shared parent (e.g. cern.ch) so one passkey works for
       # enrolment on the Pages frontend AND approval on this backend's own page;
       # both origins are accepted at verification (BITS_WEBAUTHN_ORIGINS must list
