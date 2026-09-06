@@ -92,6 +92,10 @@ services:
       BITS_FRONTEND_ORIGIN: "${BITS_FRONTEND_ORIGIN:-}"
       BITS_ADMINS_POLICY: "${BITS_ADMINS_POLICY:-}"
       BITS_ADMIN_RESOLVE_TOKEN: "${BITS_ADMIN_RESOLVE_TOKEN:-}"
+      # Convention: derive the whole admin policy from this GitLab group tree
+      # (root members = overall admins; each subgroup path = a community). Needs
+      # BITS_ADMIN_RESOLVE_TOKEN to read membership. BITS_ADMINS_POLICY merges on top.
+      BITS_ADMINS_GROUP: "${BITS_ADMINS_GROUP:-}"
       # Ops proxy (Phase 1): api-scope project token + the build project id, so the
       # backend can trigger builds on the caller's behalf after authz. Env for now.
       BITS_FORGE_OPS_TOKEN: "${BITS_FORGE_OPS_TOKEN:-}"
