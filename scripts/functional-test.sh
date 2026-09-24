@@ -32,20 +32,16 @@ H="$(docker compose exec -T bits-console-backend python3 -c \
 if [[ -n "$H" ]]; then
   ok "backend /healthz responds over https"
   echo "$H" | grep -q '"webauthn_configured": *true'   && ok "backend WebAuthn configured"   || no "backend WebAuthn NOT configured (rp_id / origin / credentials)"
-  echo "$H" | grep -q '"sign_proxy_configured": *true' && ok "backend sign-proxy URL set"    || no "backend sign-proxy URL not set (run make unlock)"
+  echo "$H" | grep -q '"sign_proxy_configured": *true' && ok "backend sign-proxy configured" || no "backend sign-proxy not configured (BITS_SIGN_PROXY_AGENT_SOCKET)"
 else
   no "backend /healthz not reachable (make up; check TLS_CERT_DIR cert/key)"
 fi
 
-# 3. backend can reach the sign-proxy pubkey (proves signer-net + URL + token).
-if [[ -n "${BITS_SIGN_PROXY_URL:-}" && -n "${BITS_SIGN_PROXY_TOKEN:-}" ]]; then
-  K="$(docker compose exec -T bits-console-backend python3 -c \
-    "import os;from bits_helpers import trust;print(trust.proxy_pubkey(os.environ['BITS_SIGN_PROXY_URL'],os.environ['BITS_SIGN_PROXY_TOKEN'])[0])" \
-    2>/dev/null || true)"
-  [[ -n "$K" ]] && ok "backend reached the sign-proxy; key_id=$K" \
-                || no "backend could NOT reach the sign-proxy (re-run make unlock; PORT/token change on restart)"
+# 3. backend reaches the loaded key (agent socket -> signer-net -> proxy -> key).
+if S="$(bash "$DIR/scripts/signing-check.sh")"; then
+  ok "backend reached the sign-proxy; ${S#*: }"
 else
-  no "BITS_SIGN_PROXY_URL/TOKEN not in .env (run make unlock)"
+  no "backend could NOT sign: ${S#*: }"
 fi
 
 echo

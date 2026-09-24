@@ -25,8 +25,9 @@ if [[ -f .env ]]; then
   else
     echo "   [!! cert.pem/key.pem MISSING — backend will not start]"
   fi
-  printf "  sign-proxy URL  : %s\n" "${BITS_SIGN_PROXY_URL:-<unset — run make unlock>}"
-  printf "  sign-proxy token: %s\n" "$([[ -n "${BITS_SIGN_PROXY_TOKEN:-}" ]] && echo set || echo '<unset — run make unlock>')"
+  if [[ -n "${BITS_SIGN_PROXY_URL:-}${BITS_SIGN_PROXY_TOKEN:-}" ]]; then
+    echo "  sign-proxy      : static BITS_SIGN_PROXY_URL/TOKEN in .env are obsolete (make unlock removes them)"
+  fi
 else
   echo "  no .env — run: make init"
 fi
@@ -35,6 +36,12 @@ echo
 echo "── health ──"
 if docker compose exec -T security-proxy test -S /run/security-proxy/agent.sock 2>/dev/null; then
   echo "  security-proxy  : up (agent socket present)"
+  G="$(docker compose exec -T security-proxy stat -c %G /run/security-proxy/agent.sock 2>/dev/null | tr -d '\r')"
+  if [[ "$G" != "bitssign" ]] || \
+     ! docker compose exec -T security-proxy test -S /run/security-proxy-ingest/ingest.sock 2>/dev/null; then
+    echo "  security-proxy  : !! old socket layout (agent group '${G:-?}') — set agent_socket_group"
+    echo "                    and ingest_socket in config.json (DEPLOYMENT.md, Upgrading)"
+  fi
 else
   echo "  security-proxy  : DOWN / no agent socket (make up)"
 fi
@@ -49,3 +56,5 @@ else
   docker compose logs --tail=12 bits-console-backend 2>/dev/null | sed 's/^/      /' \
     || echo "      (no logs — is the container created? make build up)"
 fi
+
+bash "$DIR/scripts/signing-check.sh" || true

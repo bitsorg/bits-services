@@ -30,7 +30,7 @@ EXPECT="${2:-}"
 SVC="${SECURITY_PROXY_SERVICE:-security-proxy}"     # docker compose service name
 SLOT="${SIGN_KEY_SLOT:-bits-sign-key}"
 ROUTE="${SIGN_ROUTE_SERVICE:-bits-manifest-sign}"   # route name in config.json
-INGEST="/run/security-proxy/ingest.sock"
+INGEST="/run/security-proxy-ingest/ingest.sock"
 AGENT="/run/security-proxy/agent.sock"
 
 [ -f "$PEM" ] || { echo "ERROR: no such PEM file: $PEM" >&2; exit 1; }

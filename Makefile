@@ -21,8 +21,9 @@ config:  ## Validate the compose file
 build:  ## Build service images
 	$(COMPOSE) build
 
-up:  ## Start services (detached)
+up:  ## Start services (detached), then check signing (a new proxy needs make unlock)
 	$(COMPOSE) up -d
+	-@bash scripts/signing-check.sh --wait 30
 
 down:  ## Stop services
 	$(COMPOSE) down

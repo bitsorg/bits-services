@@ -22,12 +22,16 @@ RUN python -m venv /opt/security-proxy/venv \
  && /opt/security-proxy/venv/bin/pip install --no-cache-dir .
 
 FROM python:3.12-slim
-# System, non-login runtime user. Sockets live under /run/security-proxy, which
-# is a mounted volume (writable); the rest of the fs is read-only at runtime.
-RUN useradd --system --uid 10001 --home-dir /var/lib/security-proxy \
+# System, non-login runtime user. The agent socket lives under /run/security-proxy
+# (a volume, group 'bitssign' = gid 10002, shared read-only with the backend); the
+# ingest socket under /run/security-proxy-ingest (a container-private tmpfs). The
+# rest of the fs is read-only at runtime.
+RUN groupadd --system --gid 10002 bitssign \
+ && useradd --system --uid 10001 --groups bitssign --home-dir /var/lib/security-proxy \
       --shell /usr/sbin/nologin securityproxy \
- && mkdir -p /run/security-proxy /etc/security-proxy /var/lib/security-proxy \
- && chown securityproxy:securityproxy /run/security-proxy /var/lib/security-proxy
+ && mkdir -p /run/security-proxy /run/security-proxy-ingest /etc/security-proxy /var/lib/security-proxy \
+ && chown securityproxy:bitssign /run/security-proxy \
+ && chown securityproxy:securityproxy /run/security-proxy-ingest /var/lib/security-proxy
 COPY --from=build /opt/security-proxy/venv /opt/security-proxy/venv
 ENV PATH="/opt/security-proxy/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1

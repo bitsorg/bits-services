@@ -19,7 +19,7 @@ EXPECT="${2:-}"
 SVC="${SECURITY_PROXY_SERVICE:-security-proxy}"
 SLOT="${SIGN_KEY_SLOT:-bits-sign-key}"
 ROUTE="${SIGN_ROUTE_SERVICE:-bits-manifest-sign}"
-INGEST="/run/security-proxy/ingest.sock"
+INGEST="/run/security-proxy-ingest/ingest.sock"
 AGENT="/run/security-proxy/agent.sock"
 
 [ -f "$ENC" ] || { echo "ERROR: no encrypted key at: $ENC (run encrypt-signing-key.sh first)" >&2; exit 1; }

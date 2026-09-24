@@ -28,6 +28,9 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+      # Ingest (key push) socket: private to this container, reached only via
+      # `docker compose exec` (make unlock) — never shared with the backend.
+      - /run/security-proxy-ingest:uid=10001,gid=10001,mode=0700
     cap_drop:
       - ALL
     security_opt:
@@ -40,9 +43,13 @@ services:
     volumes:
       # Root-owned config (from security-proxy/config.sample.json), read-only.
       - ${SECURITY_PROXY_CONFIG_DIR:?set SECURITY_PROXY_CONFIG_DIR in .env}:/etc/security-proxy:ro
-      # Agent + ingest sockets on a named volume (inherits the image's
-      # securityproxy ownership); the backend shares this volume in Phase 3.
+      # Agent socket on a named volume (group bitssign); the backend mounts it
+      # read-only to read the proxy's current port + gate token.
       - signer-sockets:/run/security-proxy
+    # Make sure the proxy runs with its socket group (gid 10002 = bitssign), however
+    # the image's USER is spelled; it chowns the agent socket dir to that group.
+    group_add:
+      - "10002"
     networks:
       - signer-net
     healthcheck:
@@ -85,6 +92,10 @@ services:
     environment:
       # Signing proxy — wired by `make unlock` once the proxy is up (URL + gate
       # token only exist then, and change on a proxy restart).
+      # The proxy picks a random port per start and rotates its gate token daily,
+      # so the backend asks its agent socket for both. Set it to empty in .env to
+      # use a static URL/TOKEN instead (dev only; they go stale).
+      BITS_SIGN_PROXY_AGENT_SOCKET: "${BITS_SIGN_PROXY_AGENT_SOCKET-/run/security-proxy/agent.sock}"
       BITS_SIGN_PROXY_URL: "${BITS_SIGN_PROXY_URL:-}"
       BITS_SIGN_PROXY_TOKEN: "${BITS_SIGN_PROXY_TOKEN:-}"
       # Identity (verifies the browser's GitLab token via GET /user) + CORS.
@@ -135,6 +146,11 @@ services:
     volumes:
       - webauthn-creds:/data                                   # persistent passkeys
       - ${TLS_CERT_DIR:?set TLS_CERT_DIR in .env}:/certs:ro    # cert.pem + key.pem
+      - signer-sockets:/run/security-proxy:ro                  # proxy agent socket
+    # gid 10002 = 'bitssign' in the security-proxy image: lets the (nobody) backend
+    # connect to the agent socket, nothing else of the proxy's.
+    group_add:
+      - "10002"
     networks:
       - signer-net
       - services-net
@@ -156,7 +172,7 @@ networks:
     driver: bridge
 
 volumes:
-  # Agent + ingest UNIX sockets for the signer; shared with the backend (Phase 3).
+  # The signer's agent UNIX socket; shared read-only with the backend.
   signer-sockets:
   # Persistent WebAuthn passkey store for the backend (survives restarts).
   webauthn-creds:
