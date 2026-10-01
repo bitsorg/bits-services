@@ -23,7 +23,7 @@ Design and build-out: `bits-signing-approval-design-*.md` and
 |----------------------|-------|----------------------------------------------|
 | security-proxy       | 1     | signing key in memory only; internal network |
 | bits-console backend | 3     | relying party; the only client of the proxy  |
-| monitoring           | 4     | extracted from cvmfs-testbed                 |
+| monitoring           | 4     | VictoriaMetrics, vmagent, cAdvisor, node-exporter, CORS proxy, runner-sd; shared by every setup on the host (moved from cvmfs-testbed) |
 
 The security-proxy vendors `ali-bot/security-proxy` unforked, at a pinned
 commit; the signing key is never baked into an image — it is pushed into the

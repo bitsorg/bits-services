@@ -50,6 +50,8 @@ _ask BITS_ADMINS_POLICY      "Admin policy: * @<gitlab-username>"  "* @${_gituse
 _ask SECURITY_PROXY_CONFIG_DIR "Security-proxy config dir"        "$DIR/config/security-proxy"
 _ask TLS_CERT_DIR            "Backend TLS cert dir"               "$DIR/secrets/tls"
 _ask BITS_SRC                "Local bits checkout"                "../bits"
+_ask MONITORING_DATA_DIR     "Monitoring data dir"                "$DIR/data/monitoring"
+install -d "$MONITORING_DATA_DIR/vm" "$MONITORING_DATA_DIR/vmagent"
 
 # ── Derive WebAuthn + CORS ────────────────────────────────────────────────────
 # The passkey ceremony runs on TWO origins: enrolment on the Pages frontend, and
@@ -156,6 +158,11 @@ fi
   echo "BITS_OIDC_CI_AUDIENCE='${BITS_OIDC_CI_AUDIENCE:-}'"
   echo "BITS_OIDC_JWKS_URL='${BITS_OIDC_JWKS_URL:-}'"
   echo "BITS_CI_SIGNERS='${BITS_CI_SIGNERS:-}'"
+  echo "MONITORING_DATA_DIR='${MONITORING_DATA_DIR}'"
+  echo "VM_RETENTION='${VM_RETENTION:-13}'"
+  echo "RUNNER_SD_TOKEN='${RUNNER_SD_TOKEN:-}'"
+  echo "RUNNER_SD_PROJECT_ID='${RUNNER_SD_PROJECT_ID:-}'"
+  echo "RUNNER_SD_DESC_REGEX='${RUNNER_SD_DESC_REGEX:-}'"
 } > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 

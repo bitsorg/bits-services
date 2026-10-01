@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: Apache-2.0
+# vmagent scrape configuration for the bits-services monitoring stack, shared by
+# every setup on this host (bits-console, the cvmfs-testbed, production prepub).
+#
+# Same-stack services are reached by compose service name on monitoring-net.
+# Anything else on this host -- e.g. the cvmfs-testbed's published ports -- is
+# reached through host.docker.internal (mapped to the host gateway), so the
+# testbed can be torn down and recreated without touching this stack.
+# A target that is down is just a failed scrape; nothing else breaks.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  # ── This host ────────────────────────────────────────────────────────────
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    relabel_configs:
+      - target_label: instance
+        replacement: 'host'
+
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    relabel_configs:
+      - target_label: instance
+        replacement: 'cadvisor'
+
+  # ── Production publishers (cvmfs-prepub) ─────────────────────────────────
+  # Job counts per spool state and the host's load, memory and spool disk, for
+  # the bits-console Monitoring tab's publisher row (which selects role=prepub).
+  # One target per publisher; the endpoint needs no token.
+  - job_name: 'prepub'
+    scrape_interval: 60s
+    metrics_path: '/api/v1/metrics'
+    static_configs:
+      - targets: ['cvmfs-bits-01.cern.ch:8080']
+        labels:
+          role: prepub
+
+  # ── cvmfs-testbed (published ports on this host) ─────────────────────────
+  - job_name: 'cvmfs-prepub'
+    metrics_path: '/api/v1/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:8080']
+        labels:
+          role: testbed
+    relabel_configs:
+      - target_label: instance
+        replacement: 'cvmfs-prepub'
+
+  # cvmfs-gateway does not expose a Prometheus /metrics endpoint;
+  # its port 4929 serves only the lease API (/api/v1/...).
+
+  - job_name: 'stratum1-a'
+    static_configs:
+      - targets: ['host.docker.internal:9101']
+        labels:
+          role: testbed
+    relabel_configs:
+      - target_label: instance
+        replacement: 'stratum1-a'
+
+  - job_name: 'stratum1-b'
+    static_configs:
+      - targets: ['host.docker.internal:9102']
+        labels:
+          role: testbed
+    relabel_configs:
+      - target_label: instance
+        replacement: 'stratum1-b'
+
+  # ── GitLab runner fleet ──────────────────────────────────────────────────
+  # node-exporters discovered from the GitLab Runners API via runner-sd
+  # (Prometheus http_sd). Serves [] until RUNNER_SD_TOKEN is set in .env.
+  - job_name: 'runner-nodes'
+    metrics_path: '/metrics'
+    # No refresh_interval here: vmagent rejects it (fatal at startup) and
+    # re-reads http_sd every -promscrape.httpSDCheckInterval (default 1m).
+    http_sd_configs:
+      - url: 'http://runner-sd:8080/'

@@ -4,7 +4,8 @@
 # Services are added per implementation-plan phase:
 #   Phase 1: security-proxy        (the signer; internal network only)
 #   Phase 3: bits-console backend  (relying party; only client of the proxy)
-#   Phase 4: monitoring            (extracted from cvmfs-testbed)
+#   Phase 4: monitoring            (moved from cvmfs-testbed; shared by every
+#                                   setup on this host, data persists here)
 #
 # Networks are declared now so each service attaches to the right isolated
 # segment when it lands. The signer sits on an internal-only network reachable
@@ -161,14 +162,125 @@ services:
       retries: 3
       start_period: 15s
 
+  # ─── Phase 4: monitoring (moved from cvmfs-testbed) ────────────────────────
+  # One stack for every setup on this host: bits-console (push-agent reads
+  # :8428, the browser's metrics_url is :8430), the cvmfs-testbed and the
+  # production publishers. Same images, ports and data layout as the testbed
+  # had, so nothing that talks to it changes. Data lives under
+  # MONITORING_DATA_DIR and survives `make down` / `make clean`.
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.99.0
+    restart: unless-stopped
+    command:
+      - "-storageDataPath=/victoria-metrics-data"
+      - "-retentionPeriod=${VM_RETENTION:-13}"     # months
+      - "-selfScrapeInterval=10s"
+    volumes:
+      - ${MONITORING_DATA_DIR:-./data/monitoring}/vm:/victoria-metrics-data
+    ports:
+      - "8428:8428"        # queries + /api/v1/import (push-agent, CI METRICS_URL)
+    networks:
+      - monitoring-net
+
+  vmagent:
+    image: victoriametrics/vmagent:v1.99.0
+    restart: unless-stopped
+    command:
+      - "-promscrape.config=/etc/vmagent/scrape.yml"
+      - "-remoteWrite.url=http://victoriametrics:8428/api/v1/write"
+      - "-remoteWrite.tmpDataPath=/vmagentdata"   # buffer survives a VM restart
+      - "-promscrape.maxScrapeSize=64MiB"
+    volumes:
+      - ./monitoring/scrape.yml:/etc/vmagent/scrape.yml:ro
+      - ${MONITORING_DATA_DIR:-./data/monitoring}/vmagent:/vmagentdata
+    # Other stacks on this host (the cvmfs-testbed) are scraped through their
+    # published ports, not their networks, so they come and go independently.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - victoriametrics
+    networks:
+      - monitoring-net
+
+  # Per-container CPU / memory / network / disk.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    command:
+      - "--housekeeping_interval=10s"
+      - "--max_housekeeping_interval=15s"
+      - "--disable_metrics=hugetlb,referenced_memory,cpu_topology,resctrl,udp,advtcp,sched"
+    networks:
+      - monitoring-net
+
+  # Host CPU / memory / temperature / filesystem.
+  node-exporter:
+    image: prom/node-exporter:v1.8.0
+    restart: unless-stopped
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.rootfs=/rootfs"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    networks:
+      - monitoring-net
+
+  # Read-only CORS proxy so the console in the browser can query VM.
+  vm-cors:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/nginx-cors.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8430:80"
+    depends_on:
+      - victoriametrics
+    networks:
+      - monitoring-net
+
+  # Prometheus http_sd for the GitLab runner fleet's node-exporters. Serves []
+  # (harmless) until RUNNER_SD_TOKEN is set.
+  runner-sd:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/runner-sd.py:/app/runner-sd.py:ro
+    command: ["python", "/app/runner-sd.py"]
+    environment:
+      GITLAB_URL:         ${GITLAB_URL:-https://gitlab.cern.ch}
+      RUNNER_SD_TOKEN:    ${RUNNER_SD_TOKEN:-}
+      PROJECT_ID:         ${RUNNER_SD_PROJECT_ID:-}
+      NODE_EXPORTER_PORT: ${NODE_EXPORTER_PORT:-9100}
+      ONLY_DESC_REGEX:    ${RUNNER_SD_DESC_REGEX:-}
+    networks:
+      - monitoring-net
+
 networks:
   # Internal-only: the signer. No external connectivity in or out; only the
   # bits-console backend is also attached here (Phase 3).
   signer-net:
     driver: bridge
     internal: true
-  # Backend <-> public front (web.cern.ch reverse-proxy) and monitoring scrape.
+  # Backend <-> public front (web.cern.ch reverse-proxy).
   services-net:
+    driver: bridge
+  # The monitoring stack (Phase 4). Publishes only VM :8428 and its CORS proxy
+  # :8430; the signer is never reachable from here.
+  monitoring-net:
     driver: bridge
 
 volumes:

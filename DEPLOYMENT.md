@@ -15,8 +15,9 @@ Status: **stub.** Filled in per phase of the implementation plan
 
 - `signer-net` — internal-only; the security-proxy and (Phase 3) the
   bits-console backend attach here. Nothing else may reach the signer.
-- `services-net` — backend ↔ public front (web.cern.ch reverse-proxy) and
-  monitoring scrape.
+- `services-net` — backend ↔ public front (web.cern.ch reverse-proxy).
+- `monitoring-net` — the monitoring stack (Phase 4). Publishes only
+  VictoriaMetrics `:8428` and its read-only CORS proxy `:8430`.
 
 ## Configure and run the signer (Phase 1c)
 
@@ -117,3 +118,57 @@ Expected: `401` without the token, `503` before step 1 (slot unprovisioned), and
 > **Verified on the bits host (Phase 1e):** `make build` → `make up` → push →
 > sign → verify passes end-to-end with a throwaway key
 > (`OK: signature verifies`). The production key is never used for this check.
+
+## Monitoring (Phase 4)
+
+One VictoriaMetrics for every setup on this host — bits-console, the
+cvmfs-testbed and the production publishers — with its data kept under
+`MONITORING_DATA_DIR` (default `./data/monitoring`, gitignored), so it outlives
+any testbed run. Services: `victoriametrics`, `vmagent`, `cadvisor`,
+`node-exporter`, `vm-cors`, `runner-sd`. Images, ports (`8428`, `8430`) and
+data layout are those the testbed used, so the bits-console push-agent
+(`VM_URL=http://localhost:8428`), the console's `metrics_url` (`:8430`) and the
+CI `METRICS_URL` keep working unchanged.
+
+Scrape targets are in `monitoring/scrape.yml`. Other stacks on the host (the
+testbed's prepub and Stratum 1s) are scraped through their published ports via
+`host.docker.internal`, not by joining their networks, so the testbed can be
+torn down and recreated freely; while it is down those scrapes just fail.
+
+### Moving the data over from the testbed (once)
+
+The two stacks publish the same ports, so the testbed's monitoring containers
+must go first. They have fixed names, so remove them by name (the testbed's
+compose no longer lists them):
+
+    # 1. stop the testbed's monitoring containers
+    docker rm -f cvmfs-victoriametrics cvmfs-vmagent cvmfs-cadvisor \
+                 cvmfs-node-exporter cvmfs-vm-cors cvmfs-runner-sd
+
+    # 2. copy its VictoriaMetrics data into an EMPTY data dir, before this
+    #    stack's VictoriaMetrics has ever started (two trees must not mix)
+    cd ~/bits-services
+    TESTBED_ROOT=/path/to/testbed/root          # from the testbed's .env
+    D="$(. ./.env 2>/dev/null; echo "${MONITORING_DATA_DIR:-./data/monitoring}")"
+    docker compose stop victoriametrics 2>/dev/null || true
+    sudo ls -A "$D/vm" 2>/dev/null | grep -q . && echo "STOP: $D/vm is not empty"
+    # only if that printed nothing:
+    sudo install -d "$D/vm" "$D/vmagent"
+    sudo cp -a "$TESTBED_ROOT/data/monitoring/vm/." "$D/vm/"
+
+    # 3. start it here, then check the scrapes (role="testbed" is the testbed,
+    #    role="prepub" the production publishers)
+    # (only the monitoring services: the signer is left as it is, key loaded)
+    docker compose up -d victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
+    curl -s -G http://localhost:8428/api/v1/query --data-urlencode 'query=up'
+
+Two things differ from the testbed's stack: retention is 13 months
+(`VM_RETENTION`, was 1), and the `prepub` job also scrapes the production
+publisher cvmfs-bits-01. The testbed's `data/monitoring/vmagent` held nothing
+(no `-remoteWrite.tmpDataPath` was set there), so it is not copied.
+
+Copy `RUNNER_SD_TOKEN` / `RUNNER_SD_PROJECT_ID` / `RUNNER_SD_DESC_REGEX` from the
+testbed's `.env` into this one if you used runner discovery there. Once this
+stack is confirmed scraping, the monitoring services are removed from the
+testbed's compose (its own data dir can then be deleted).
+

@@ -23,3 +23,6 @@ __pycache__/
 
 # generated proxy config dir (from make init)
 config/
+
+# monitoring data (MONITORING_DATA_DIR default)
+/data/
