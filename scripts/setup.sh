@@ -51,7 +51,8 @@ _ask SECURITY_PROXY_CONFIG_DIR "Security-proxy config dir"        "$DIR/config/s
 _ask TLS_CERT_DIR            "Backend TLS cert dir"               "$DIR/secrets/tls"
 _ask BITS_SRC                "Local bits checkout"                "../bits"
 _ask MONITORING_DATA_DIR     "Monitoring data dir"                "$DIR/data/monitoring"
-install -d "$MONITORING_DATA_DIR/vm" "$MONITORING_DATA_DIR/vmagent"
+# World-writable as in the testbed: the VictoriaMetrics images need not run as you.
+install -d -m 777 "$MONITORING_DATA_DIR/vm" "$MONITORING_DATA_DIR/vmagent"
 
 # ── Derive WebAuthn + CORS ────────────────────────────────────────────────────
 # The passkey ceremony runs on TWO origins: enrolment on the Pages frontend, and

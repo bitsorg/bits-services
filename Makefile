@@ -6,11 +6,14 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help init config build up down ps status logs unlock test clean
+.PHONY: help init config build up down ps status logs unlock test clean monitoring monitoring-check
+
+# The monitoring stack (Phase 4), started on its own by `make monitoring`.
+MON_SERVICES := victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
 
 help:  ## Print this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
-	  awk 'BEGIN{FS=":.*?## "}{printf "  %-8s %s\n", $$1, $$2}'
+	  awk 'BEGIN{FS=":.*?## "}{printf "  %-17s %s\n", $$1, $$2}'
 
 init:  ## One-time setup: prompts → .env, proxy config, self-signed TLS cert
 	bash scripts/setup.sh
@@ -43,5 +46,12 @@ unlock:  ## Decrypt the signing key into the running proxy + wire its URL/token 
 test:  ## Functional wiring check (proxy up, backend https/healthz, backend→proxy)
 	bash scripts/functional-test.sh
 
-clean:  ## Stop services and remove containers + volumes (keeps .env)
+monitoring:  ## Start/refresh only the monitoring stack (signer + backend untouched)
+	$(COMPOSE) up -d $(MON_SERVICES)
+
+monitoring-check:  ## Scrape targets and whether each is up (1) or down (0)
+	@curl -s -G http://localhost:8428/api/v1/query --data-urlencode 'query=up' | \
+	  python3 -c 'import sys,json; [print("%s  %-14s %-10s %s" % (r["value"][1], r["metric"].get("job",""), r["metric"].get("role",""), r["metric"].get("instance",""))) for r in sorted(json.load(sys.stdin)["data"]["result"], key=lambda r: r["metric"].get("job",""))]'
+
+clean:  ## Stop services and remove containers + volumes (keeps .env and monitoring data)
 	$(COMPOSE) down -v

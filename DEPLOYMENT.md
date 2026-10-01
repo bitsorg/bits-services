@@ -153,14 +153,14 @@ compose no longer lists them):
     docker compose stop victoriametrics 2>/dev/null || true
     sudo ls -A "$D/vm" 2>/dev/null | grep -q . && echo "STOP: $D/vm is not empty"
     # only if that printed nothing:
-    sudo install -d "$D/vm" "$D/vmagent"
+    sudo install -d -m 777 "$D/vm" "$D/vmagent"
     sudo cp -a "$TESTBED_ROOT/data/monitoring/vm/." "$D/vm/"
 
     # 3. start it here, then check the scrapes (role="testbed" is the testbed,
     #    role="prepub" the production publishers)
     # (only the monitoring services: the signer is left as it is, key loaded)
-    docker compose up -d victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
-    curl -s -G http://localhost:8428/api/v1/query --data-urlencode 'query=up'
+    make monitoring
+    make monitoring-check
 
 Two things differ from the testbed's stack: retention is 13 months
 (`VM_RETENTION`, was 1), and the `prepub` job also scrapes the production
