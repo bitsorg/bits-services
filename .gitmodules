@@ -4,4 +4,4 @@
 [submodule "bits"]
 	path = bits
 	url = https://github.com/bitsorg/bits.git
-	branch = consolidation
+	branch = main
