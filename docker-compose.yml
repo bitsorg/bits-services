@@ -194,6 +194,9 @@ services:
       # ops token); the builds' BOMs and build index come from the store.
       BITS_FORGE_READ_TOKEN: "${BITS_FORGE_READ_TOKEN:-}"
       BITS_ORCH_LOOKBACK_DAYS: "${BITS_ORCH_LOOKBACK_DAYS:-7}"
+      # Failure backfill (M2): days of older failed pipelines to read once from
+      # GitLab, a page per pass (0 = off).
+      BITS_ORCH_BACKFILL_DAYS: "${BITS_ORCH_BACKFILL_DAYS:-0}"
       BITS_ORCH_STORE: "${BITS_ORCH_STORE:-}"
       BITS_S3_ENDPOINT_URL: "${BITS_S3_ENDPOINT_URL:-}"
       AWS_ACCESS_KEY_ID: "${BITS_ORCH_S3_ACCESS_KEY_ID:-}"
