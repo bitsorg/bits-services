@@ -75,7 +75,7 @@ services:
         WORKDIR /app
         COPY . /src
         ENV PYTHONPATH=/src:/src/console-backend PYTHONDONTWRITEBYTECODE=1
-        RUN pip install --no-cache-dir /src/console-backend cryptography pyyaml requests
+        RUN pip install --no-cache-dir /src/console-backend cryptography pyyaml requests boto3
         # /data (persistent passkey store) must be writable by the runtime user; a
         # fresh named volume mounted here inherits this ownership.
         RUN install -d -o nobody -g nogroup /data /orch
@@ -130,6 +130,9 @@ services:
       # Orchestrator database, shared with bits-orchestrator (which owns and
       # migrates it); the API writes only action requests and approvals.
       BITS_ORCH_DB: /orch/orch.db
+      # Audience of the CI ID tokens build jobs send with their hints (/ops/ci/*),
+      # distinct from BITS_OIDC_CI_AUDIENCE so a hint token cannot sign.
+      BITS_ORCH_CI_AUDIENCE: "${BITS_ORCH_CI_AUDIENCE:-bits-orchestrator}"
       # CI identity (optional; for automated signing later).
       BITS_OIDC_ISSUER: "${BITS_OIDC_ISSUER:-}"
       BITS_OIDC_CI_AUDIENCE: "${BITS_OIDC_CI_AUDIENCE:-}"
@@ -187,6 +190,14 @@ services:
     environment:
       BITS_ORCH_DB: /orch/orch.db
       BITS_ORCH_INTERVAL: "${BITS_ORCH_INTERVAL:-30}"
+      # Reconcile (M1): GitLab is read with a read_api token when set (else the
+      # ops token); the builds' BOMs and build index come from the store.
+      BITS_FORGE_READ_TOKEN: "${BITS_FORGE_READ_TOKEN:-}"
+      BITS_ORCH_LOOKBACK_DAYS: "${BITS_ORCH_LOOKBACK_DAYS:-7}"
+      BITS_ORCH_STORE: "${BITS_ORCH_STORE:-}"
+      BITS_S3_ENDPOINT_URL: "${BITS_S3_ENDPOINT_URL:-}"
+      AWS_ACCESS_KEY_ID: "${BITS_ORCH_S3_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${BITS_ORCH_S3_SECRET_ACCESS_KEY:-}"
       GITLAB_API_URL: "${GITLAB_API_URL:-}"
       BITS_ADMINS_POLICY: "${BITS_ADMINS_POLICY:-}"
       BITS_ADMIN_RESOLVE_TOKEN: "${BITS_ADMIN_RESOLVE_TOKEN:-}"
