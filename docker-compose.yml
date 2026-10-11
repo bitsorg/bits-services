@@ -78,7 +78,7 @@ services:
         RUN pip install --no-cache-dir /src/console-backend cryptography pyyaml requests
         # /data (persistent passkey store) must be writable by the runtime user; a
         # fresh named volume mounted here inherits this ownership.
-        RUN install -d -o nobody -g nogroup /data
+        RUN install -d -o nobody -g nogroup /data /orch
         USER nobody
         EXPOSE 8443
         CMD ["uvicorn","console_backend.main:app","--host","0.0.0.0","--port","8443","--ssl-keyfile","/certs/key.pem","--ssl-certfile","/certs/cert.pem"]
@@ -127,6 +127,9 @@ services:
       BITS_WEBAUTHN_REQUIRE_UV: "${BITS_WEBAUTHN_REQUIRE_UV:-1}"
       BITS_ENROLLMENT_AUTHORITY: "${BITS_ENROLLMENT_AUTHORITY:-1}"
       BITS_WEBAUTHN_REQUIRED: "${BITS_WEBAUTHN_REQUIRED:-0}"
+      # Orchestrator database, shared with bits-orchestrator (which owns and
+      # migrates it); the API writes only action requests and approvals.
+      BITS_ORCH_DB: /orch/orch.db
       # CI identity (optional; for automated signing later).
       BITS_OIDC_ISSUER: "${BITS_OIDC_ISSUER:-}"
       BITS_OIDC_CI_AUDIENCE: "${BITS_OIDC_CI_AUDIENCE:-}"
@@ -146,6 +149,7 @@ services:
       - "443:8443"          # https on the backend's own origin
     volumes:
       - webauthn-creds:/data                                   # persistent passkeys
+      - orch-data:/orch                                        # orchestrator database
       - ${TLS_CERT_DIR:?set TLS_CERT_DIR in .env}:/certs:ro    # cert.pem + key.pem
       - signer-sockets:/run/security-proxy:ro                  # proxy agent socket
     # gid 10002 = 'bitssign' in the security-proxy image: lets the (nobody) backend
@@ -161,6 +165,46 @@ services:
       timeout: 3s
       retries: 3
       start_period: 15s
+
+  # ─── Orchestrator worker ───────────────────────────────────────────────────
+  # The backend's image, run as its own process: owns the orchestrator database
+  # (/orch, shared with the backend) and runs actions with the forge token. No
+  # published port; not on signer-net until it signs (milestone M5).
+  bits-orchestrator:
+    image: bits-services/bits-console-backend:local
+    pull_policy: never          # built by bits-console-backend above
+    depends_on:
+      - bits-console-backend
+    command: ["python3", "-m", "console_backend.orch.worker"]
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      BITS_ORCH_DB: /orch/orch.db
+      BITS_ORCH_INTERVAL: "${BITS_ORCH_INTERVAL:-30}"
+      GITLAB_API_URL: "${GITLAB_API_URL:-}"
+      BITS_ADMINS_POLICY: "${BITS_ADMINS_POLICY:-}"
+      BITS_ADMIN_RESOLVE_TOKEN: "${BITS_ADMIN_RESOLVE_TOKEN:-}"
+      BITS_ADMINS_GROUP: "${BITS_ADMINS_GROUP:-}"
+      BITS_FORGE_OPS_TOKEN: "${BITS_FORGE_OPS_TOKEN:-}"
+      BITS_FORGE_PROJECT: "${BITS_FORGE_PROJECT:-}"
+      BITS_FORGE_REFS: "${BITS_FORGE_REFS:-main}"
+    volumes:
+      - orch-data:/orch
+    networks:
+      - services-net
+    healthcheck:
+      # The worker touches the heartbeat after every pass (default every 30 s).
+      test: ["CMD", "python3", "-c", "import os,sys,time; sys.exit(time.time() - os.path.getmtime('/orch/orch.db.heartbeat') > 150)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
 
   # ─── Phase 4: monitoring (moved from cvmfs-testbed) ────────────────────────
   # One stack for every setup on this host: bits-console (push-agent reads
@@ -288,3 +332,5 @@ volumes:
   signer-sockets:
   # Persistent WebAuthn passkey store for the backend (survives restarts).
   webauthn-creds:
+  # The orchestrator's SQLite database, shared by the backend and the worker.
+  orch-data:
