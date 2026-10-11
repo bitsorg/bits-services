@@ -197,6 +197,9 @@ services:
       # Failure backfill (M2): days of older failed pipelines to read once from
       # GitLab, a page per pass (0 = off).
       BITS_ORCH_BACKFILL_DAYS: "${BITS_ORCH_BACKFILL_DAYS:-0}"
+      # A daily copy of the database (approvals, failures and the audit chain
+      # cannot be rebuilt), a week kept. Put ORCH_BACKUP_DIR on another disk.
+      BITS_ORCH_BACKUP_DIR: /orch-backup
       BITS_ORCH_STORE: "${BITS_ORCH_STORE:-}"
       BITS_S3_ENDPOINT_URL: "${BITS_S3_ENDPOINT_URL:-}"
       AWS_ACCESS_KEY_ID: "${BITS_ORCH_S3_ACCESS_KEY_ID:-}"
@@ -210,6 +213,8 @@ services:
       BITS_FORGE_REFS: "${BITS_FORGE_REFS:-main}"
     volumes:
       - orch-data:/orch
+      # Must be writable by uid 65534 (nobody), the worker's user.
+      - ${ORCH_BACKUP_DIR:-./data/orch-backup}:/orch-backup
     networks:
       - services-net
     healthcheck:
