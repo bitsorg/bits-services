@@ -158,6 +158,18 @@ for kind in ("read", "ops", "groups"):
         import requests
         r = requests.get(api + "/user", headers={"PRIVATE-TOKEN": token}, timeout=20)
         out["gitlab-" + kind] = r.status_code if r.status_code != 200 else "ok as " + r.json().get("username", "?")
+        # What the services read by path (a / inside a path segment), as they do.
+        from urllib.parse import quote
+        seg = lambda v: quote(credproxy.segment(s, v), safe="")
+        paths = {"read": [s.orch_manifests_project, s.forge_project], "ops": [s.forge_project],
+                 "groups": []}[kind]
+        for proj in [p for p in paths if p]:
+            r = requests.get(api + "/projects/" + seg(proj), headers={"PRIVATE-TOKEN": token}, timeout=20)
+            out["gitlab-%s project %s" % (kind, proj)] = "ok" if r.status_code == 200 else r.status_code
+        if kind == "groups" and s.admins_group:
+            r = requests.get(api + "/groups/" + seg(s.admins_group) + "/members",
+                             headers={"PRIVATE-TOKEN": token}, timeout=20)
+            out["gitlab-groups group %s" % s.admins_group] = "ok" if r.status_code == 200 else r.status_code
     except Exception as e:
         out["gitlab-" + kind] = "%s: %s" % (type(e).__name__, e)
 bucket = (s.orch_store or "").split("::")[0][len("b3://"):].split("/")[0]
