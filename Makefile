@@ -6,7 +6,7 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help init config build audit-token up down ps status logs unlock test clean monitoring monitoring-check
+.PHONY: help init config build audit-token up down ps status logs unlock secret credentials-check test clean monitoring monitoring-check
 
 # The monitoring stack (Phase 4), started on its own by `make monitoring`.
 MON_SERVICES := victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
@@ -45,8 +45,15 @@ status:  ## At-a-glance: containers + config + cert + health (+ backend logs if 
 logs:  ## Tail service logs
 	$(COMPOSE) logs -f --tail=100
 
-unlock:  ## Decrypt the signing key into the running proxy + wire its URL/token into .env
+unlock:  ## Decrypt the signing key and the service secrets into the running proxies
 	bash scripts/unlock.sh
+
+secret:  ## Store a service secret: make secret SLOT=gitlab-read (prompts the value)
+	@test -n "$(SLOT)" || { echo "usage: make secret SLOT=<slot>"; exit 1; }
+	python3 tools/service-secrets.py set "$(SLOT)"
+
+credentials-check:  ## GitLab and the store through the credentials proxy, from the worker
+	python3 tools/service-secrets.py check
 
 test:  ## Functional wiring check (proxy up, backend https/healthz, backend→proxy)
 	bash scripts/functional-test.sh

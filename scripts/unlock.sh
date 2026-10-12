@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # unlock.sh — run via `make unlock`. Decrypts the signing key into the RUNNING
-# security-proxy (prompts the passphrase). The key lives only in proxy memory, so
+# security-proxy (prompts the passphrase), then the service secrets into the
+# credentials proxy (prompts theirs, M6). Both live only in proxy memory, so
 # re-run this after every proxy (re)start. The backend finds the proxy's current
 # port and gate token itself, via the shared agent socket — nothing to wire.
 #
@@ -27,5 +28,10 @@ if [[ -f "$ENV_FILE" ]] && grep -qE '^BITS_SIGN_PROXY_(URL|TOKEN)=' "$ENV_FILE";
   echo ">> removed the obsolete static BITS_SIGN_PROXY_URL/TOKEN from .env"
 fi
 
-# 3. End-to-end check through the backend.
+# 3. The service secrets into the credentials proxy (M6), when there are any.
+if [[ -f "$DIR/secrets/service-secrets.enc" ]]; then
+  python3 "$DIR/tools/service-secrets.py" push
+fi
+
+# 4. End-to-end check through the backend.
 bash "$DIR/scripts/signing-check.sh" --wait 15

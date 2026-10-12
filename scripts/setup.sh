@@ -89,6 +89,15 @@ if [[ ! -f "$SECURITY_PROXY_CONFIG_DIR/config.json" ]]; then
 else
   info "proxy config.json already present"
 fi
+# The credentials proxy (M6), same image, its own config: check its bucket names.
+CREDENTIALS_PROXY_CONFIG_DIR="${CREDENTIALS_PROXY_CONFIG_DIR:-$DIR/config/credentials-proxy}"
+install -d "$CREDENTIALS_PROXY_CONFIG_DIR"
+if [[ ! -f "$CREDENTIALS_PROXY_CONFIG_DIR/config.json" ]]; then
+  cp "$DIR/security-proxy/credentials.sample.json" "$CREDENTIALS_PROXY_CONFIG_DIR/config.json"
+  success "copied credentials.sample.json -> $CREDENTIALS_PROXY_CONFIG_DIR/config.json"
+else
+  info "credentials proxy config.json already present"
+fi
 
 # ── Backend TLS cert (generate a self-signed pair if missing) ─────────────────
 install -d "$TLS_CERT_DIR"
@@ -133,6 +142,9 @@ else
 fi
 
 # ── Write .env ────────────────────────────────────────────────────────────────
+# The settings below are the ones this script asks for; any other the old .env
+# had (the orchestrator's, the credentials proxy's, ...) is kept, appended after.
+_OLD_ENV="$(cat "$ENV_FILE" 2>/dev/null || true)"
 # Single-quoted values are literal for BOTH bash `source` and docker compose (no
 # $ / backtick expansion in either), so a free-text admin policy can't be mangled
 # or execute anything on the next re-source. (Values must not contain a literal
@@ -165,6 +177,13 @@ fi
   echo "RUNNER_SD_PROJECT_ID='${RUNNER_SD_PROJECT_ID:-}'"
   echo "RUNNER_SD_DESC_REGEX='${RUNNER_SD_DESC_REGEX:-}'"
 } > "$ENV_FILE"
+if [[ -n "$_OLD_ENV" ]]; then
+  _kept=$(printf '%s\n' "$_OLD_ENV" | awk -F= 'NR==FNR { if ($1 ~ /^[A-Za-z_][A-Za-z0-9_]*$/) have[$1]=1; next }
+    /^[A-Za-z_][A-Za-z0-9_]*=/ && !($1 in have)' "$ENV_FILE" -)
+  if [[ -n "$_kept" ]]; then
+    { echo "# kept from the previous .env"; printf '%s\n' "$_kept"; } >> "$ENV_FILE"
+  fi
+fi
 chmod 600 "$ENV_FILE"
 
 success "wrote $ENV_FILE"

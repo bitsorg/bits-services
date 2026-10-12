@@ -60,6 +60,47 @@ services:
       retries: 3
       start_period: 10s
 
+  # ─── The credentials proxy (orchestrator M6) ───────────────────────────────
+  # A second security-proxy instance, from the same image: it holds the GitLab
+  # tokens and the store's keys, which `make unlock` pushes into its memory, and
+  # adds them to the backend's and the worker's requests on the way out. They
+  # hold only its gate tokens, from its agent socket. Kept apart from the
+  # signer: it needs egress, and the signer keeps none (signer-net is internal).
+  # Config: security-proxy/credentials.sample.json; secrets: tools/service-secrets.py.
+  credentials-proxy:
+    image: bits-services/security-proxy:local
+    pull_policy: never          # built by security-proxy above
+    # Off until it is set up (config dir, secrets): COMPOSE_PROFILES=credentials
+    # in .env starts it with the rest. No depends_on the signer, so starting this
+    # one never recreates the signer (which would drop its key).
+    profiles:
+      - credentials
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/security-proxy-ingest:uid=10001,gid=10001,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      core: 0
+    mem_swappiness: 0
+    volumes:
+      - ${CREDENTIALS_PROXY_CONFIG_DIR:-./config/credentials-proxy}:/etc/security-proxy:ro
+      - credential-sockets:/run/security-proxy
+    group_add:
+      - "10002"
+    networks:
+      - cred-net
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/security-proxy/agent.sock"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
   # ─── Phase 3 (Stage B): the relying-party backend ──────────────────────────
   # Its OWN origin (e.g. https://bits.cern.ch): the browser on the GitLab Pages
   # frontend (bits-console.web.cern.ch) calls it cross-origin. It is the ONLY
@@ -148,6 +189,10 @@ services:
       BITS_SESSION_TTL: "${BITS_SESSION_TTL:-86400}"
       BITS_LOGIN_MAX_AGE: "${BITS_LOGIN_MAX_AGE:-}"
       BITS_LOGIN_RETURN_ALLOW: "${BITS_LOGIN_RETURN_ALLOW:-}"
+      # M6: set to /run/credentials-proxy/agent.sock (in .env) once the service
+      # secrets are pushed and checked; then BITS_FORGE_OPS_TOKEN and
+      # BITS_ADMIN_RESOLVE_TOKEN can go. Empty = the tokens above, as before.
+      BITS_CRED_PROXY_AGENT_SOCKET: "${BITS_CRED_PROXY_AGENT_SOCKET:-}"
     ports:
       - "443:8443"          # https on the backend's own origin
     volumes:
@@ -155,6 +200,7 @@ services:
       - orch-data:/orch                                        # orchestrator database
       - ${TLS_CERT_DIR:?set TLS_CERT_DIR in .env}:/certs:ro    # cert.pem + key.pem
       - signer-sockets:/run/security-proxy:ro                  # proxy agent socket
+      - credential-sockets:/run/credentials-proxy:ro           # credentials proxy's
     # gid 10002 = 'bitssign' in the security-proxy image: lets the (nobody) backend
     # connect to the agent socket, nothing else of the proxy's.
     group_add:
@@ -162,6 +208,7 @@ services:
     networks:
       - signer-net
       - services-net
+      - cred-net
     healthcheck:
       test: ["CMD", "python3", "-c", "import ssl,urllib.request; urllib.request.urlopen('https://127.0.0.1:8443/healthz', context=ssl._create_unverified_context())"]
       interval: 30s
@@ -223,8 +270,13 @@ services:
       BITS_FORGE_OPS_TOKEN: "${BITS_FORGE_OPS_TOKEN:-}"
       BITS_FORGE_PROJECT: "${BITS_FORGE_PROJECT:-}"
       BITS_FORGE_REFS: "${BITS_FORGE_REFS:-main}"
+      # M6: as for the backend; then BITS_FORGE_READ_TOKEN, BITS_FORGE_OPS_TOKEN,
+      # BITS_ADMIN_RESOLVE_TOKEN and BITS_ORCH_S3_* can go.
+      BITS_CRED_PROXY_AGENT_SOCKET: "${BITS_CRED_PROXY_AGENT_SOCKET:-}"
+      BITS_ORCH_S3_REGION: "${BITS_ORCH_S3_REGION:-us-east-1}"
     volumes:
       - orch-data:/orch
+      - credential-sockets:/run/credentials-proxy:ro
       # Must be writable by uid 65534 (nobody), the worker's user.
       - ${ORCH_BACKUP_DIR:-./data/orch-backup}:/orch-backup
       # The CA of the audit-log service's certificate, once it runs elsewhere
@@ -232,9 +284,14 @@ services:
       - ${ORCH_AUDIT_CAFILE:-/dev/null}:/certs/audit-ca.pem:ro
     secrets:
       - audit_token
+    # gid 10002 = 'bitssign' in the security-proxy image: the credentials proxy's
+    # agent socket, nothing else.
+    group_add:
+      - "10002"
     networks:
       - services-net
       - audit-net
+      - cred-net
     healthcheck:
       # The worker touches the heartbeat after every pass (default every 30 s).
       test: ["CMD", "python3", "-c", "import os,sys,time; sys.exit(time.time() - os.path.getmtime('/orch/orch.db.heartbeat') > 150)"]
@@ -395,6 +452,10 @@ networks:
   # :8430; the signer is never reachable from here.
   monitoring-net:
     driver: bridge
+  # The backend and the worker <-> the credentials proxy, which reaches GitLab
+  # and the store from here (not internal: it needs the way out).
+  cred-net:
+    driver: bridge
   # The worker (and vmagent) <-> audit-log. Internal: no way in or out.
   audit-net:
     driver: bridge
@@ -408,6 +469,8 @@ secrets:
 volumes:
   # The signer's agent UNIX socket; shared read-only with the backend.
   signer-sockets:
+  # The credentials proxy's agent socket; read-only for the backend and the worker.
+  credential-sockets:
   # Persistent WebAuthn passkey store for the backend (survives restarts).
   webauthn-creds:
   # The orchestrator's SQLite database, shared by the backend and the worker.
