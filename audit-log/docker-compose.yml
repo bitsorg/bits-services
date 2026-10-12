@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2026 CERN
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# The outside copy of the bits orchestrator's audit chain. Runs on its own node
+# (cvmfs-bits-01), not on the orchestrator's host. See README.md.
+#
+#   cp .env.example .env      # set AUDIT_DATA_DIR, the certificate paths
+#   make token               # writes secrets/audit_token (give it to the orchestrator)
+#   docker compose up -d --build
+
+services:
+  audit-log:
+    build: .
+    image: bits-services/audit-log:local
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      AUDIT_DATA: /data
+      AUDIT_LISTEN: "0.0.0.0:8443"
+      AUDIT_TOKEN_FILE: /run/secrets/audit_token
+      AUDIT_READ_TOKEN_FILE: "${AUDIT_READ_TOKEN_FILE:-}"
+      # HTTPS when both are set (recommended: the token crosses the network).
+      AUDIT_TLS_CERT: "${AUDIT_TLS_CERT:+/certs/cert.pem}"
+      AUDIT_TLS_KEY: "${AUDIT_TLS_KEY:+/certs/key.pem}"
+    secrets:
+      - audit_token
+    volumes:
+      # Must be writable by uid 65534 (nobody). Back this directory up: it is
+      # the copy that survives losing the orchestrator's host.
+      - ${AUDIT_DATA_DIR:-./data}:/data
+      - ${AUDIT_TLS_CERT:-/dev/null}:/certs/cert.pem:ro
+      - ${AUDIT_TLS_KEY:-/dev/null}:/certs/key.pem:ro
+    ports:
+      - "${AUDIT_PORT:-8443}:8443"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 8443), 3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+secrets:
+  audit_token:
+    file: ./secrets/audit_token

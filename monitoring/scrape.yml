@@ -40,6 +40,15 @@ scrape_configs:
         labels:
           role: prepub
 
+  # ── The outside audit copy (audit-log, on this host for now) ─────────────
+  # Its head seq and how many batches it accepted or refused (no token needed).
+  - job_name: 'audit-log'
+    scrape_interval: 60s
+    static_configs:
+      - targets: ['audit-log:8443']
+        labels:
+          role: audit
+
   # ── cvmfs-testbed (published ports on this host) ─────────────────────────
   - job_name: 'cvmfs-prepub'
     metrics_path: '/api/v1/metrics'

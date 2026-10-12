@@ -172,3 +172,31 @@ testbed's `.env` into this one if you used runner discovery there. Once this
 stack is confirmed scraping, the monitoring services are removed from the
 testbed's compose (its own data dir can then be deleted).
 
+## The orchestrator's shadow certification and outside audit copy (M4)
+
+The worker recomputes every certification the bits-manifests CI signs and
+compares it with what was signed; it signs and commits nothing. Set in `.env`:
+
+    BITS_ORCH_MANIFESTS_PROJECT=buncic/bits-manifests
+    BITS_ORCH_STORE=b3://<the bucket the certify job validates against>
+
+The read token (`BITS_FORGE_READ_TOKEN`) must reach bits-manifests too (Reporter).
+Results are under `GET /ops/certifications`; `GET /ops/certifications/summary?days=14`
+counts the sign runs by state, which is the milestone's gate (every one `match`).
+The first certification of an architecture hashes all of its store objects once;
+later ones hash only the new objects.
+
+The outside copy of the audit chain is the `audit-log` service, for now on this
+host (its own container, data directory and internal network; the worker can
+only append through its API). Once:
+
+    make audit-token                                          # secrets/audit_token
+    sudo install -d -o 65534 -g 65534 data/audit-log          # or AUDIT_DATA_DIR, another disk
+    make up
+
+The worker sends the whole chain, then follows it. Check it with
+`docker compose exec bits-orchestrator python3 -m console_backend.orch.outside verify`.
+On this host it guards against a rewritten or wrongly restored database, not
+against someone with root here. To move it to cvmfs-bits-01 later: run
+`audit-log/` there (see its README), copy `events.jsonl` over, and set
+`BITS_ORCH_AUDIT_URL` and `BITS_ORCH_AUDIT_TOKEN` in `.env`.

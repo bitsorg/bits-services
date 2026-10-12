@@ -178,6 +178,7 @@ services:
     pull_policy: never          # built by bits-console-backend above
     depends_on:
       - bits-console-backend
+      - audit-log
     command: ["python3", "-m", "console_backend.orch.worker"]
     restart: unless-stopped
     read_only: true
@@ -201,6 +202,17 @@ services:
       # cannot be rebuilt), a week kept. Put ORCH_BACKUP_DIR on another disk.
       BITS_ORCH_BACKUP_DIR: /orch-backup
       BITS_ORCH_STORE: "${BITS_ORCH_STORE:-}"
+      # Certification in shadow (M4): the bits-manifests project whose main
+      # pipelines certify; the worker recomputes each certification and compares
+      # (read with the read token, the store above). Empty = off.
+      BITS_ORCH_MANIFESTS_PROJECT: "${BITS_ORCH_MANIFESTS_PROJECT:-}"
+      BITS_ORCH_DEFAULT_ARCH: "${BITS_ORCH_DEFAULT_ARCH:-}"
+      # The outside copy of the audit chain (M4): the audit-log service below,
+      # for now on this host; later on cvmfs-bits-01 (set the URL and token).
+      # Set BITS_ORCH_AUDIT_URL= (empty) to stop sending.
+      BITS_ORCH_AUDIT_URL: "${BITS_ORCH_AUDIT_URL-http://audit-log:8443}"
+      BITS_ORCH_AUDIT_TOKEN: "${BITS_ORCH_AUDIT_TOKEN:-/run/secrets/audit_token}"
+      BITS_ORCH_AUDIT_CAFILE: "${ORCH_AUDIT_CAFILE:+/certs/audit-ca.pem}"
       BITS_S3_ENDPOINT_URL: "${BITS_S3_ENDPOINT_URL:-}"
       AWS_ACCESS_KEY_ID: "${BITS_ORCH_S3_ACCESS_KEY_ID:-}"
       AWS_SECRET_ACCESS_KEY: "${BITS_ORCH_S3_SECRET_ACCESS_KEY:-}"
@@ -215,8 +227,14 @@ services:
       - orch-data:/orch
       # Must be writable by uid 65534 (nobody), the worker's user.
       - ${ORCH_BACKUP_DIR:-./data/orch-backup}:/orch-backup
+      # The CA of the audit-log service's certificate, once it runs elsewhere
+      # with one that is not public.
+      - ${ORCH_AUDIT_CAFILE:-/dev/null}:/certs/audit-ca.pem:ro
+    secrets:
+      - audit_token
     networks:
       - services-net
+      - audit-net
     healthcheck:
       # The worker touches the heartbeat after every pass (default every 30 s).
       test: ["CMD", "python3", "-c", "import os,sys,time; sys.exit(time.time() - os.path.getmtime('/orch/orch.db.heartbeat') > 150)"]
@@ -224,6 +242,37 @@ services:
       timeout: 3s
       retries: 3
       start_period: 60s
+
+  # The outside copy of the orchestrator's audit chain (audit-log/): it keeps
+  # only events that link onto its chain and cannot change or remove one. For
+  # now on this host, in a container and directory of its own that the worker
+  # can only append to through its API; it moves to cvmfs-bits-01 later (copy
+  # events.jsonl there). `make audit-token` creates the shared token.
+  audit-log:
+    build: ./audit-log
+    image: bits-services/audit-log:local
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      AUDIT_DATA: /data
+      AUDIT_LISTEN: "0.0.0.0:8443"
+      AUDIT_TOKEN_FILE: /run/secrets/audit_token
+    secrets:
+      - audit_token
+    volumes:
+      # Must be writable by uid 65534 (nobody). Ideally on another disk; back it up.
+      - ${AUDIT_DATA_DIR:-./data/audit-log}:/data
+    networks:
+      - audit-net
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8443/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   # ─── Phase 4: monitoring (moved from cvmfs-testbed) ────────────────────────
   # One stack for every setup on this host: bits-console (push-agent reads
@@ -264,6 +313,7 @@ services:
       - victoriametrics
     networks:
       - monitoring-net
+      - audit-net               # scrapes audit-log's /metrics
 
   # Per-container CPU / memory / network / disk.
   cadvisor:
@@ -345,6 +395,15 @@ networks:
   # :8430; the signer is never reachable from here.
   monitoring-net:
     driver: bridge
+  # The worker (and vmagent) <-> audit-log. Internal: no way in or out.
+  audit-net:
+    driver: bridge
+    internal: true
+
+secrets:
+  # The audit-log write token, shared by audit-log and the worker (make audit-token).
+  audit_token:
+    file: ./secrets/audit_token
 
 volumes:
   # The signer's agent UNIX socket; shared read-only with the backend.

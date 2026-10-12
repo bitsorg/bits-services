@@ -6,7 +6,7 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help init config build up down ps status logs unlock test clean monitoring monitoring-check
+.PHONY: help init config build audit-token up down ps status logs unlock test clean monitoring monitoring-check
 
 # The monitoring stack (Phase 4), started on its own by `make monitoring`.
 MON_SERVICES := victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
@@ -24,7 +24,12 @@ config:  ## Validate the compose file
 build:  ## Build service images
 	$(COMPOSE) build
 
-up:  ## Start services (detached), then check signing (a new proxy needs make unlock)
+audit-token:  ## Create the audit-log token (secrets/audit_token) once
+	@mkdir -p -m 700 secrets
+	@test -s secrets/audit_token || { umask 022; python3 -c "import secrets; print(secrets.token_urlsafe(32))" > secrets/audit_token; echo "created secrets/audit_token"; }
+	@test -d $${AUDIT_DATA_DIR:-./data/audit-log} || echo "create the audit-log data dir: sudo install -d -o 65534 -g 65534 $${AUDIT_DATA_DIR:-./data/audit-log}"
+
+up: audit-token  ## Start services (detached), then check signing (a new proxy needs make unlock)
 	$(COMPOSE) up -d
 	-@bash scripts/signing-check.sh --wait 30
 
