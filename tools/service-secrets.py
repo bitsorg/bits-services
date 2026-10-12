@@ -175,8 +175,10 @@ for kind in ("read", "ops", "groups"):
 bucket = (s.orch_store or "").split("::")[0][len("b3://"):].split("/")[0]
 if bucket:
     try:
-        credproxy.s3_client(s)[0].list_objects_v2(Bucket=bucket, Prefix="MANIFESTS/", MaxKeys=1)
-        out["s3 " + bucket] = "ok"
+        from console_backend.orch import kinds
+        c, b = kinds.Deps(s).store()            # anonymous, or through the proxy
+        c.list_objects_v2(Bucket=b, Prefix="MANIFESTS/", MaxKeys=1)
+        out["s3 " + bucket] = "ok, " + ("anonymous" if s.orch_store_anonymous else "through the proxy")
     except Exception as e:
         out["s3 " + bucket] = "%s: %s" % (type(e).__name__, str(e)[:200])
 print(json.dumps(out, indent=1))

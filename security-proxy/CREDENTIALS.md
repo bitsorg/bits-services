@@ -53,6 +53,12 @@ back is setting `BITS_CRED_PROXY_AGENT_SOCKET=` (empty) with the variables back.
     make unlock                      # pushes it; no service restarts
     python3 tools/service-secrets.py list
 
+The store is publicly readable, and until M8 the worker only reads it. With
+`BITS_ORCH_STORE_ANONYMOUS=1` in `.env` it reads with no credentials at all;
+then take the `s3` route out of the proxy's config and remove its slots
+(`tools/service-secrets.py remove s3-access-<bucket>`, and `s3-secret-<bucket>`).
+The route comes back at M8, with a keypair only the worker holds.
+
 A new bucket is a new entry under the `s3` route's `buckets` in the config (a
 root-owned file: a changed upstream would replay the keys elsewhere) and its
 `s3-access-<bucket>` / `s3-secret-<bucket>` slots.
