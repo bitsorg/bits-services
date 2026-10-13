@@ -1,0 +1,29 @@
+{
+  "_comment": "bits store writer (M8a): the third security-proxy instance. Its only route, s3, holds the store keypair the orchestrator worker writes its signed manifests with. Only the worker mounts its agent socket and shares its network (store-net), so the backend cannot use it. Copy to STORE_WRITER_CONFIG_DIR as config.json (root-owned, read-only). Its slots (s3-access-<bucket>, s3-secret-<bucket>) and a throwaway client certificate are pushed by `make unlock` (tools/service-secrets.py); until then the route answers 503.",
+  "host": "0.0.0.0",
+  "cert": {
+    "ingest": "client-cert"
+  },
+  "agent_socket": "/run/security-proxy/agent.sock",
+  "agent_socket_group": "bitssign",
+  "ingest_socket": "/run/security-proxy-ingest/ingest.sock",
+  "secret_rotation_seconds": 86400,
+  "routes": [
+    {
+      "name": "s3",
+      "upstream": "https://s3.cern.ch",
+      "s3": {
+        "buckets": {
+          "lcgapp-bits-testing": {
+            "access_key": {
+              "ingest": "s3-access-lcgapp-bits-testing"
+            },
+            "secret_key": {
+              "ingest": "s3-secret-lcgapp-bits-testing"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

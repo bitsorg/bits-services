@@ -66,3 +66,45 @@ root-owned file: a changed upstream would replay the keys elsewhere) and its
 Both the backend and the worker can use every route of this proxy (its agent
 socket hands out all of its gate tokens). So give the store a keypair that can
 only read for now; writing `MANIFESTS/` (M8) gets its own, more narrowly held.
+
+## The store writer and worker certification (orchestrator M8a)
+
+From M8a the worker certifies builds itself and writes the signed manifests to
+the store; until M8b under `CANARY/` (the canary), which production does not
+read, compared with the CI's. Writing needs the store's keypair, and the
+credentials proxy is the wrong place for it: its agent socket hands every route
+to the backend too, which faces the internet. So the keypair moves to a third
+security-proxy instance, `store-writer`, whose socket and network (`store-net`)
+only the worker has. The worker also signs: it mounts the signer's agent socket
+and joins `signer-net`, as the backend does.
+
+Turning it on, in this order (each step can stay as it is for a while):
+
+1. The worker reads the store anonymously (`BITS_ORCH_STORE_ANONYMOUS=1`, done
+   in M6) and the new code is deployed with certification off.
+2. The store writer: its config, then `store` in the profiles, then the keys.
+
+       install -d config/store-writer
+       cp security-proxy/store-writer.sample.json config/store-writer/config.json
+       # .env: COMPOSE_PROFILES=credentials,store
+       #       BITS_STORE_WRITER_AGENT_SOCKET=/run/store-writer/agent.sock
+       docker compose up -d store-writer bits-orchestrator
+       make unlock            # the s3-* slots now go to the store writer
+       make credentials-check # "s3 writer <bucket>": ok
+
+3. The credentials proxy loses its `s3` route: remove it from
+   `config/credentials-proxy/config.json` (as in credentials.sample.json), then
+   `docker compose restart credentials-proxy && make unlock`.
+4. Signing, then certification itself:
+
+       # .env: BITS_ORCH_SIGN_PROXY_AGENT_SOCKET=/run/security-proxy/agent.sock
+       #       BITS_ORCH_CERTIFY=1
+       docker compose up -d --force-recreate bits-orchestrator
+
+   It certifies the builds recorded from then on, never older ones. At most
+   `BITS_ORCH_CERTIFY_DAILY_SIGNS` (100) signatures a day; past it, certifying
+   pauses with a `worker.step_failed` event. Manifests are valid
+   `BITS_ORCH_CERTIFY_VALID_DAYS` (30) days, as the CI's.
+
+Going back: `BITS_ORCH_CERTIFY=` (empty) stops it at once; until M8b nothing
+reads what it writes.

@@ -9,11 +9,12 @@
 #
 # Networks are declared now so each service attaches to the right isolated
 # segment when it lands. The signer sits on an internal-only network reachable
-# solely by the backend; nothing else may talk to it.
+# solely by the backend and the orchestrator worker; nothing else may talk to it.
 
 services:
   # ─── Phase 1: the manifest signer ──────────────────────────────────────────
-  # Reachable ONLY on signer-net, by the bits-console backend (Phase 3). No
+  # Reachable ONLY on signer-net, by the bits-console backend (Phase 3) and,
+  # since M8a, the orchestrator worker. No
   # published ports. No key baked or mounted — the Ed25519 seed is pushed over
   # the ingest socket at runtime and held only in memory.
   security-proxy:
@@ -94,6 +95,43 @@ services:
       - "10002"
     networks:
       - cred-net
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/security-proxy/agent.sock"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # ─── The store writer (orchestrator M8a) ───────────────────────────────────
+  # A third security-proxy instance, from the same image: its only route, s3,
+  # holds the store keypair the worker writes its manifests with. Only the
+  # worker mounts its socket and shares its network: the backend, which faces the
+  # internet, cannot reach it. Config: security-proxy/store-writer.sample.json;
+  # its slots (s3-access-<bucket>, s3-secret-<bucket>) are pushed by make unlock.
+  store-writer:
+    image: bits-services/security-proxy:local
+    pull_policy: never          # built by security-proxy above
+    profiles:
+      - store
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/security-proxy-ingest:uid=10001,gid=10001,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      core: 0
+    mem_swappiness: 0
+    volumes:
+      - ${STORE_WRITER_CONFIG_DIR:-./config/store-writer}:/etc/security-proxy:ro
+      - store-writer-sockets:/run/security-proxy
+    group_add:
+      - "10002"
+    networks:
+      - store-net
     healthcheck:
       test: ["CMD-SHELL", "test -S /run/security-proxy/agent.sock"]
       interval: 30s
@@ -219,7 +257,7 @@ services:
   # ─── Orchestrator worker ───────────────────────────────────────────────────
   # The backend's image, run as its own process: owns the orchestrator database
   # (/orch, shared with the backend) and runs actions with the forge token. No
-  # published port; not on signer-net until it signs (milestone M5).
+  # published port; on signer-net since it certifies builds (M8a).
   bits-orchestrator:
     image: bits-services/bits-console-backend:local
     pull_policy: never          # built by bits-console-backend above
@@ -278,9 +316,20 @@ services:
       # BITS_ADMIN_RESOLVE_TOKEN and BITS_ORCH_S3_* can go.
       BITS_CRED_PROXY_AGENT_SOCKET: "${BITS_CRED_PROXY_AGENT_SOCKET:-}"
       BITS_ORCH_S3_REGION: "${BITS_ORCH_S3_REGION:-us-east-1}"
+      # The worker certifies builds (M8a): it signs through the signer (its
+      # agent socket, below) and writes through the store writer; until M8b
+      # under CANARY/, which production does not read. Off until
+      # BITS_ORCH_CERTIFY=1.
+      BITS_ORCH_CERTIFY: "${BITS_ORCH_CERTIFY:-}"
+      BITS_ORCH_CERTIFY_VALID_DAYS: "${BITS_ORCH_CERTIFY_VALID_DAYS:-30}"
+      BITS_ORCH_CERTIFY_DAILY_SIGNS: "${BITS_ORCH_CERTIFY_DAILY_SIGNS:-100}"
+      BITS_SIGN_PROXY_AGENT_SOCKET: "${BITS_ORCH_SIGN_PROXY_AGENT_SOCKET:-}"
+      BITS_STORE_WRITER_AGENT_SOCKET: "${BITS_STORE_WRITER_AGENT_SOCKET:-}"
     volumes:
       - orch-data:/orch
       - credential-sockets:/run/credentials-proxy:ro
+      - signer-sockets:/run/security-proxy:ro            # the signer's agent socket (M8a)
+      - store-writer-sockets:/run/store-writer:ro        # the store writer's (M8a)
       # Must be writable by uid 65534 (nobody), the worker's user.
       - ${ORCH_BACKUP_DIR:-./data/orch-backup}:/orch-backup
       # The CA of the audit-log service's certificate, once it runs elsewhere
@@ -288,14 +337,16 @@ services:
       - ${ORCH_AUDIT_CAFILE:-/dev/null}:/certs/audit-ca.pem:ro
     secrets:
       - audit_token
-    # gid 10002 = 'bitssign' in the security-proxy image: the credentials proxy's
-    # agent socket, nothing else.
+    # gid 10002 = 'bitssign' in the security-proxy image: the proxies' agent
+    # sockets, nothing else.
     group_add:
       - "10002"
     networks:
       - services-net
       - audit-net
       - cred-net
+      - signer-net        # the signer (M8a); internal, no way out
+      - store-net         # the store writer (M8a), only the worker's
     healthcheck:
       # The worker touches the heartbeat after every pass (default every 30 s).
       test: ["CMD", "python3", "-c", "import os,sys,time; sys.exit(time.time() - os.path.getmtime('/orch/orch.db.heartbeat') > 150)"]
@@ -460,6 +511,10 @@ networks:
   # and the store from here (not internal: it needs the way out).
   cred-net:
     driver: bridge
+  # The worker <-> the store writer, which reaches the store from here (not
+  # internal). Nothing else is on it: the backend cannot reach the writer.
+  store-net:
+    driver: bridge
   # The worker (and vmagent) <-> audit-log. Internal: no way in or out.
   audit-net:
     driver: bridge
@@ -475,6 +530,8 @@ volumes:
   signer-sockets:
   # The credentials proxy's agent socket; read-only for the backend and the worker.
   credential-sockets:
+  # The store writer's agent socket; read-only for the worker alone.
+  store-writer-sockets:
   # Persistent WebAuthn passkey store for the backend (survives restarts).
   webauthn-creds:
   # The orchestrator's SQLite database, shared by the backend and the worker.
