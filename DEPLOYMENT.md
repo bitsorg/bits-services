@@ -205,7 +205,7 @@ against someone with root here. To move it to cvmfs-bits-01 later: run
 
 From the switch the worker keeps the certified set itself (certify adds a
 build, decertify and withdrawals take BOMs out), writes the production
-manifests (`MANIFESTS/common-manifest-<arch>.json`, numbered, no expiry), puts
+manifests (`MANIFESTS/common-manifest-<arch>.json`, numbered), puts
 `MANIFESTS/orchestrator.json` in the store, and commits every version of the set
 to bits-manifests (the mirror). The bits-manifests CI no longer signs or merges,
 and the backend's `/sign*` routes answer 410. Before it: the M8a gate, and a bits
@@ -235,6 +235,10 @@ on the runners and with the users that reads the store marker.
 Going back: remove `BITS_ORCH_OWNS_SET` and `BACKEND_SIGNER_SOCKETS` from `.env`,
 recreate the two services, and delete the CI/CD variable; bits-manifests holds
 the same set (the mirror), so its next pipeline signs what the worker last had.
+Then remove the store's marker, which tells bits to leave certification to the
+worker (`bits certify` would open no merge request, `bits sign` would refuse):
+`bits store rm --raw MANIFESTS/orchestrator.json --force` (after the worker is
+recreated: in owned mode it writes the marker again).
 Its manifests are unnumbered, which a build node that has read the worker's
 numbered ones refuses as older: remove `~/.bits/trust-sequence.json` on the build
 nodes when going back.
