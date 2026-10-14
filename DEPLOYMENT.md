@@ -200,3 +200,41 @@ On this host it guards against a rewritten or wrongly restored database, not
 against someone with root here. To move it to cvmfs-bits-01 later: run
 `audit-log/` there (see its README), copy `events.jsonl` over, and set
 `BITS_ORCH_AUDIT_URL` and `BITS_ORCH_AUDIT_TOKEN` in `.env`.
+
+## The switch: the orchestrator owns the certified set (M8b)
+
+From the switch the worker keeps the certified set itself (certify adds a
+build, decertify and withdrawals take BOMs out), writes the production
+manifests (`MANIFESTS/common-manifest-<arch>.json`, numbered, no expiry), puts
+`MANIFESTS/orchestrator.json` in the store, and commits every version of the set
+to bits-manifests (the mirror). The bits-manifests CI no longer signs or merges,
+and the backend's `/sign*` routes answer 410. Before it: the M8a gate, and a bits
+on the runners and with the users that reads the store marker.
+
+1. The mirror's credential: a bits-manifests project access token (Maintainer,
+   `api`) that may push to `main`. `tools/service-secrets.py set gitlab-mirror`,
+   add the `gitlab-mirror` route of `security-proxy/store-writer.sample.json` to the
+   store writer's `config.json` (only the worker reaches it), then `make unlock`.
+   In bits-manifests, protect `main` so that only that token's bot may push and
+   nobody may merge (the mirror is then the only writer).
+2. In bits-manifests, the CI/CD variable `BITS_ORCHESTRATOR_OWNS_SET=true`, *not*
+   Protected (merge-request pipelines must see it): the sign job stops, and
+   certification merge requests are refused.
+3. In `.env`: `BITS_ORCH_OWNS_SET=1` and `BACKEND_SIGNER_SOCKETS=retired-signer-sockets`
+   (the backend then cannot reach the signer at all). Then
+   `docker compose up -d bits-console-backend bits-orchestrator`.
+4. Check: `MANIFESTS/orchestrator.json` is in the store; within a pass every
+   architecture of the set is re-signed once (`MANIFESTS/common-manifest-<arch>.json`
+   with a `sequence`; then every ten days, well inside its 30-day expiry); each
+   certification lands as an `orchestrator: certified set version N` commit in
+   bits-manifests; `POST /sign/preapproved` answers 410.
+5. Remove `trust_manifest_prefix` from testbed.bits' `defaults-testbed.sh` and,
+   once no node reads it, the store's `CANARY/` manifests: they are no longer
+   re-signed, and ahead of `MANIFESTS/` they would hide the current ones.
+
+Going back: remove `BITS_ORCH_OWNS_SET` and `BACKEND_SIGNER_SOCKETS` from `.env`,
+recreate the two services, and delete the CI/CD variable; bits-manifests holds
+the same set (the mirror), so its next pipeline signs what the worker last had.
+Its manifests are unnumbered, which a build node that has read the worker's
+numbered ones refuses as older: remove `~/.bits/trust-sequence.json` on the build
+nodes when going back.

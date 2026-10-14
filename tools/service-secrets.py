@@ -20,6 +20,8 @@ Each prompts for the passphrase. Slots (see security-proxy/credentials.sample.js
     gitlab-read    read_api token: pipelines, jobs, logs, bits-manifests
     gitlab-ops     the project token for pipeline actions and variables
     gitlab-groups  read_api token that can read the admin groups' members
+    gitlab-mirror  bits-manifests token that may push to main (M8b: the mirror),
+                   pushed into the store writer, which only the worker reaches
     s3-access-<bucket>, s3-secret-<bucket>    the store's keypair: pushed into
                    the store writer (M8a) when it runs, else the credentials proxy
 
@@ -50,7 +52,8 @@ CERT_SLOT = "client-cert"
 # gitlab-read as the services read today: with the read token, else the ops token.
 FROM_ENV = {"gitlab-read": ("BITS_FORGE_READ_TOKEN", "BITS_FORGE_OPS_TOKEN"),
             "gitlab-ops": ("BITS_FORGE_OPS_TOKEN",),
-            "gitlab-groups": ("BITS_ADMIN_RESOLVE_TOKEN",)}
+            "gitlab-groups": ("BITS_ADMIN_RESOLVE_TOKEN",),
+            "gitlab-mirror": ("BITS_FORGE_MIRROR_TOKEN",)}
 
 
 def _key(passphrase, salt, n=2 ** 15, r=8, p=1):
@@ -273,7 +276,8 @@ def main():
                 sys.exit("%s did not take the client certificate: %s" % (service, out.strip()))
         where = {}
         for slot in sorted(secrets):
-            service = WRITER if writer and slot.startswith("s3-") else SERVICE
+            service = (WRITER if writer and (slot.startswith("s3-") or slot == "gitlab-mirror")
+                       else SERVICE)
             _push(slot, secrets[slot], service)
             where.setdefault(service, []).append(slot)
         for service, slots in sorted(where.items()):

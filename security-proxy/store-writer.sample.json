@@ -24,6 +24,17 @@
           }
         }
       }
+    },
+    {
+      "_comment": "M8b: a bits-manifests project token that may push to its main branch; the worker mirrors the certified set it owns there. Here, not in the credentials proxy, so the backend can never push to bits-manifests. Leave it out until the switch.",
+      "name": "gitlab-mirror",
+      "upstream": "https://gitlab.cern.ch",
+      "auth_header": "PRIVATE-TOKEN",
+      "inject_headers": {
+        "PRIVATE-TOKEN": {
+          "ingest": "gitlab-mirror"
+        }
+      }
     }
   ]
 }

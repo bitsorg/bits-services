@@ -178,6 +178,8 @@ services:
       BITS_SIGN_PROXY_AGENT_SOCKET: "${BITS_SIGN_PROXY_AGENT_SOCKET-/run/security-proxy/agent.sock}"
       BITS_SIGN_PROXY_URL: "${BITS_SIGN_PROXY_URL:-}"
       BITS_SIGN_PROXY_TOKEN: "${BITS_SIGN_PROXY_TOKEN:-}"
+      # M8b, the switch (with the worker's): the /sign routes answer 410.
+      BITS_ORCH_OWNS_SET: "${BITS_ORCH_OWNS_SET:-}"
       # Identity (verifies the browser's GitLab token via GET /user) + CORS.
       GITLAB_API_URL: "${GITLAB_API_URL:-}"
       BITS_FRONTEND_ORIGIN: "${BITS_FRONTEND_ORIGIN:-}"
@@ -237,7 +239,10 @@ services:
       - webauthn-creds:/data                                   # persistent passkeys
       - orch-data:/orch                                        # orchestrator database
       - ${TLS_CERT_DIR:?set TLS_CERT_DIR in .env}:/certs:ro    # cert.pem + key.pem
-      - signer-sockets:/run/security-proxy:ro                  # proxy agent socket
+      # The signer's agent socket, until the switch (M8b): then
+      # BACKEND_SIGNER_SOCKETS=retired-signer-sockets gives the backend an empty
+      # volume instead, so only the worker can reach the signer.
+      - ${BACKEND_SIGNER_SOCKETS:-signer-sockets}:/run/security-proxy:ro
       - credential-sockets:/run/credentials-proxy:ro           # credentials proxy's
     # gid 10002 = 'bitssign' in the security-proxy image: lets the (nobody) backend
     # connect to the agent socket, nothing else of the proxy's.
@@ -325,6 +330,11 @@ services:
       BITS_ORCH_CERTIFY_DAILY_SIGNS: "${BITS_ORCH_CERTIFY_DAILY_SIGNS:-100}"
       BITS_SIGN_PROXY_AGENT_SOCKET: "${BITS_ORCH_SIGN_PROXY_AGENT_SOCKET:-}"
       BITS_STORE_WRITER_AGENT_SOCKET: "${BITS_STORE_WRITER_AGENT_SOCKET:-}"
+      # M8b, the switch: the worker owns the certified set, writes MANIFESTS/
+      # and mirrors the set to bits-manifests (the gitlab-mirror route of the
+      # credentials proxy, or this token). Unset = M8a.
+      BITS_ORCH_OWNS_SET: "${BITS_ORCH_OWNS_SET:-}"
+      BITS_FORGE_MIRROR_TOKEN: "${BITS_FORGE_MIRROR_TOKEN:-}"
     volumes:
       - orch-data:/orch
       - credential-sockets:/run/credentials-proxy:ro
@@ -526,8 +536,10 @@ secrets:
     file: ./secrets/audit_token
 
 volumes:
-  # The signer's agent UNIX socket; shared read-only with the backend.
+  # The signer's agent UNIX socket; shared read-only with the backend (until M8b).
   signer-sockets:
+  # Empty: what the backend mounts in the signer's place after the switch.
+  retired-signer-sockets:
   # The credentials proxy's agent socket; read-only for the backend and the worker.
   credential-sockets:
   # The store writer's agent socket; read-only for the worker alone.
