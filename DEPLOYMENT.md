@@ -242,3 +242,20 @@ recreated: in owned mode it writes the marker again).
 Its manifests are unnumbered, which a build node that has read the worker's
 numbered ones refuses as older: remove `~/.bits/trust-sequence.json` on the build
 nodes when going back.
+
+## The CVMFS status document from the orchestrator
+
+The console's CVMFS tab and Packages page read `cvmfs-status.json` from the
+build project's generic package registry. The worker writes it from the builds
+it records, in place of a status job in every build pipeline:
+
+1. The ops token (`BITS_FORGE_OPS_TOKEN`) needs Developer on the build project
+   and `api` scope, to upload to its package registry.
+2. Deploy the bits-console change that removes `bits-prepub-update-status`
+   first, so that the worker is the document's only writer. Publishes in
+   between are not lost: the worker starts from every build it has recorded.
+3. In `.env`: `BITS_ORCH_CVMFS_STATUS=1`, then
+   `docker compose up -d bits-orchestrator`.
+4. Check: after the next publish, `cvmfs-status.json` has a record with
+   `"status": "published"` for it; a `cvmfs_status` step failure shows in
+   `GET /ops/events` as `worker.step_failed`.
