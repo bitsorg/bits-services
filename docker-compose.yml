@@ -211,6 +211,13 @@ services:
       # Orchestrator database, shared with bits-orchestrator (which owns and
       # migrates it); the API writes only action requests and approvals.
       BITS_ORCH_DB: /orch/orch.db
+      # The store, read only, for the builds' SBOMs (GET /ops/builds/{pipeline}/sbom):
+      # anonymously or through the credentials proxy; no store keys here.
+      BITS_ORCH_STORE: "${BITS_ORCH_STORE:-}"
+      BITS_ORCH_STORE_ANONYMOUS: "${BITS_ORCH_STORE_ANONYMOUS:-}"
+      BITS_ORCH_S3_ENDPOINT: "${BITS_ORCH_S3_ENDPOINT:-}"
+      BITS_S3_ENDPOINT_URL: "${BITS_S3_ENDPOINT_URL:-}"
+      BITS_ORCH_S3_REGION: "${BITS_ORCH_S3_REGION:-us-east-1}"
       # Audience of the CI ID tokens build jobs send with their hints (/ops/ci/*),
       # distinct from BITS_OIDC_CI_AUDIENCE so a hint token cannot sign.
       BITS_ORCH_CI_AUDIENCE: "${BITS_ORCH_CI_AUDIENCE:-bits-orchestrator}"
