@@ -259,3 +259,24 @@ it records, in place of a status job in every build pipeline:
 4. Check: after the next publish, `cvmfs-status.json` has a record with
    `"status": "published"` for it; a `cvmfs_status` step failure shows in
    `GET /ops/events` as `worker.step_failed`.
+
+## The build queue
+
+With the queue, the console's builds wait in the orchestrator and the worker
+starts them one per build host, so pending builds never hold the build
+project's limit of jobs in active pipelines (which blocks its Pages pipeline):
+
+1. The bits-console change that queues builds gives each host of
+   `config/build-hosts.yaml` its `arch` (`x86_64`); add `runner:` to a host
+   whose GitLab runner's description is not its `name`.
+2. In `.env`: `BITS_ORCH_QUEUE=1`, then
+   `docker compose up -d bits-orchestrator bits-console-backend` (the worker
+   first, so nothing queued waits for it).
+3. Check: `curl -s https://<backend>/healthz` shows `"build_queue": true`; the
+   Builds page shows the *Queue* box with the hosts, and a queued build starts
+   within a pass (`BITS_ORCH_INTERVAL`). A `dispatch` step failure (no hosts,
+   GitLab refusing pipelines) shows in `GET /ops/events` as `worker.step_failed`.
+
+Going back: remove `BITS_ORCH_QUEUE` and recreate both services; the console
+starts builds directly again. Builds still queued are not started: queue them
+again.
