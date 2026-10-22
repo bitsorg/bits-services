@@ -280,3 +280,21 @@ project's limit of jobs in active pipelines (which blocks its Pages pipeline):
 Going back: remove `BITS_ORCH_QUEUE` and recreate both services; the console
 starts builds directly again. Builds still queued are not started: queue them
 again.
+
+## Who built and approved a file on CVMFS (`bits trace`)
+
+`bits trace <file>` asks the backend which pipeline published the file's package
+and who requested and approved it. The orchestrator learns which build published
+each path from the prepub nodes' measurement records:
+
+1. In `.env`: `BITS_ORCH_PREPUB_URLS=http://<prepub-1>:8080,http://<prepub-2>:8080`
+   (every prepub that publishes), then `docker compose up -d bits-orchestrator
+   bits-console-backend` (migration 12 adds the index).
+2. The `trace` step reads every build prepub has records of, 50 a pass per
+   prepub, so the history is indexed within a few passes; a prepub it cannot
+   reach is logged (`trace` in the worker log) and tried again next pass.
+3. Check: `bits trace /cvmfs/<repo>/<a package's file>` names the publishing
+   pipeline; without the index it says the orchestrator has none.
+
+prepub's measurement records are now the record of who published what: keep
+their directory on prepub's persistent disk and in its backups.

@@ -304,6 +304,9 @@ services:
       # build-hosts.yaml, with the ops token.
       BITS_ORCH_QUEUE: "${BITS_ORCH_QUEUE:-}"
       BITS_ORCH_BUILD_HOSTS: "${BITS_ORCH_BUILD_HOSTS:-config/build-hosts.yaml}"
+      # The prepub nodes (comma-separated URLs): which build published each CVMFS
+      # path, from their measurement records, for `bits trace`.
+      BITS_ORCH_PREPUB_URLS: "${BITS_ORCH_PREPUB_URLS:-}"
       # A daily copy of the database (approvals, failures and the audit chain
       # cannot be rebuilt), a week kept. Put ORCH_BACKUP_DIR on another disk.
       BITS_ORCH_BACKUP_DIR: /orch-backup
