@@ -6,13 +6,17 @@
 # key), without the /trust/pubkey cache. Run by
 # `make up` and `make status`. Exit 0 and print the key_id when it works; exit 1
 # with a hint otherwise. The key lives only in proxy memory, so every proxy
-# (re)start needs `make unlock`.
+# (re)start needs `make unlock`. After the M8b switch (BITS_ORCH_OWNS_SET) only
+# the orchestrator reaches the signer, so the check asks from there.
 #
 #   scripts/signing-check.sh [--wait SECONDS]   # wait for the backend to come up
 
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$DIR"
+[[ -f .env ]] && { set -a; source .env; set +a; }   # generated, single-quoted → safe
+SVC=bits-console-backend
+[[ "${BITS_ORCH_OWNS_SET:-}" =~ ^(1|true|yes)$ ]] && SVC=bits-orchestrator
 WAIT=0
 if [[ "${1:-}" == "--wait" ]]; then
   WAIT="${2:-30}"
@@ -22,7 +26,7 @@ fi
 probe() {
   # Straight through the backend's own proxy client (agent socket -> proxy ->
   # loaded key), bypassing the 60 s /trust/pubkey cache, so "live" is current.
-  docker compose exec -T bits-console-backend python3 - 2>/dev/null <<'PY'
+  docker compose exec -T "$SVC" python3 - 2>/dev/null <<'PY'
 try:
     from console_backend import config, signproxy
     from bits_helpers import trust
@@ -44,7 +48,7 @@ while :; do
 done
 
 case "$R" in
-  OK*) echo "  signing         : live, key_id=${R#OK }"; exit 0 ;;
+  OK*) echo "  signing         : live, key_id=${R#OK } (from $SVC)"; exit 0 ;;
   "ERR unconfigured"*)
        echo "  signing         : not configured — ${R#ERR unconfigured }" ;;
   *"agent socket"*"Permission denied"*)
@@ -58,6 +62,6 @@ case "$R" in
   ERR*)
        echo "  signing         : signing key NOT loaded (or proxy down) — run: make unlock"
        echo "                    (${R#ERR })" ;;
-  *)   echo "  signing         : backend not answering (make up; make status)" ;;
+  *)   echo "  signing         : $SVC not answering (make up; make status)" ;;
 esac
 exit 1
