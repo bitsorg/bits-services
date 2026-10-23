@@ -354,6 +354,9 @@ services:
       # credentials proxy, or this token). Unset = M8a.
       BITS_ORCH_OWNS_SET: "${BITS_ORCH_OWNS_SET:-}"
       BITS_FORGE_MIRROR_TOKEN: "${BITS_FORGE_MIRROR_TOKEN:-}"
+      # Vulnerability scans of the builds' SBOMs: the sbom-scanner below
+      # (COMPOSE_PROFILES=scanner, then http://sbom-scanner:8080). Empty = off.
+      BITS_ORCH_SCANNER_URL: "${BITS_ORCH_SCANNER_URL:-}"
     volumes:
       - orch-data:/orch
       - credential-sockets:/run/credentials-proxy:ro
@@ -376,6 +379,7 @@ services:
       - cred-net
       - signer-net        # the signer (M8a); internal, no way out
       - store-net         # the store writer (M8a), only the worker's
+      - scan-net          # the sbom-scanner, only the worker's
     healthcheck:
       # The worker touches the heartbeat after every pass (default every 30 s).
       test: ["CMD", "python3", "-c", "import os,sys,time; sys.exit(time.time() - os.path.getmtime('/orch/orch.db.heartbeat') > 150)"]
@@ -414,6 +418,34 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # Vulnerability scans (sbom-scanner/): grype against the builds' SBOMs, for
+  # the worker alone. No secret; its only way out is grype's database download.
+  sbom-scanner:
+    build: ./sbom-scanner
+    image: bits-services/sbom-scanner:local
+    profiles:
+      - scanner
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      SCANNER_DB_REFRESH_HOURS: "${SCANNER_DB_REFRESH_HOURS:-6}"
+    volumes:
+      - scanner-db:/db
+    networks:
+      - scan-net
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 10m       # the first database download
 
   # ─── Phase 4: monitoring (moved from cvmfs-testbed) ────────────────────────
   # One stack for every setup on this host: bits-console (push-agent reads
@@ -544,6 +576,10 @@ networks:
   # internal). Nothing else is on it: the backend cannot reach the writer.
   store-net:
     driver: bridge
+  # The worker <-> the sbom-scanner, which downloads its database from here
+  # (not internal). Nothing else is on it.
+  scan-net:
+    driver: bridge
   # The worker (and vmagent) <-> audit-log. Internal: no way in or out.
   audit-net:
     driver: bridge
@@ -567,3 +603,5 @@ volumes:
   webauthn-creds:
   # The orchestrator's SQLite database, shared by the backend and the worker.
   orch-data:
+  # grype's vulnerability database (sbom-scanner).
+  scanner-db:

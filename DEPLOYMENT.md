@@ -298,3 +298,32 @@ each path from the prepub nodes' measurement records:
 
 prepub's measurement records are now the record of who published what: keep
 their directory on prepub's persistent disk and in its backups.
+
+## Vulnerability scans
+
+The `sbom-scanner` service (grype) checks every published build's SBOM; the
+console's Vulnerabilities page lists the builds, most severe first, and each
+build's SBOM report shows its vulnerabilities. Needs bits with the SBOM report
+and scans (console-backend migration 13).
+
+1. `.env`: add `scanner` to `COMPOSE_PROFILES` and set
+   `BITS_ORCH_SCANNER_URL=http://sbom-scanner:8080`. The host must reach
+   `grype.anchore.io`. The database takes about 3.5 GB in the `scanner-db` volume,
+   and an update unpacks a second copy beside it: allow 8 GB.
+2. `docker compose build sbom-scanner` (builds grype from source, a few minutes),
+   then `docker compose up -d sbom-scanner bits-orchestrator bits-console-backend`.
+3. The first database download takes a few minutes: `docker compose ps
+   sbom-scanner` turns healthy when it is loaded; until then the worker's
+   `scan` step waits.
+4. The worker scans up to 3 builds a pass, newest first, and every build again
+   when the database is newer (daily); while the scanner updates its database
+   the step waits. Check: `GET /ops/sbom/scans` lists them, `sbom.scanned`
+   events record a change of a build's counts. The findings are kept beside the
+   orchestrator database (`sbom-scans/` in its volume), outside its backups: a
+   lost copy comes back with the next scan.
+5. Who sees what: the Vulnerabilities page and the findings in a build's SBOM
+   report are for the admins of the build's community (as its builds are); the
+   SBOM itself stays readable by every signed-in user.
+
+Turning it off: `BITS_ORCH_SCANNER_URL=` and restart the worker; the scans
+already made stay readable.
