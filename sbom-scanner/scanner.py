@@ -6,8 +6,9 @@
 The bits orchestrator's worker POSTs each published build's sbom.cdx.json. grype
 matches its components (their purls and CPEs) with its vulnerability database,
 and the SBOM comes back unchanged but for a CycloneDX `vulnerabilities` section
-whose `affects` name the SBOM's own bom-refs, so viewers (CycloneDX Sunshine)
-can show them on the dependency graph. The service holds no secret; its only
+whose `affects` name the SBOM's own bom-refs (with the fixing versions as
+`unaffected`), so viewers can show them on the dependency graph; grype's risk,
+EPSS and KEV are grype:* properties. The service holds no secret; its only
 traffic out is grype's database download, refreshed every
 SCANNER_DB_REFRESH_HOURS. One scan or update runs at a time.
 
@@ -113,9 +114,20 @@ def _ratings(v, severity):
     return out or [{"severity": severity, "method": "other"}]
 
 
+def _threat(v):
+    """grype's risk score, the highest EPSS and the CISA KEV date of *v*, as properties."""
+    epss = max([float(e.get("epss") or 0) for e in v.get("epss") or []] or [0])
+    kev = [str(k.get("dateAdded") or "listed") for k in v.get("knownExploited") or []]
+    return [{"name": k, "value": x} for k, x in (
+        ("grype:risk", f"{float(v.get('risk') or 0):.2f}" if v.get("risk") else ""),
+        ("grype:epss", f"{epss:.5f}" if epss else ""),
+        ("grype:kev", min(kev) if kev else "")) if x]
+
+
 def annotate(sbom, matches):
     """(*sbom* with a `vulnerabilities` section from grype's *matches*, summary).
-    One entry per vulnerability, affecting every component it matched."""
+    One entry per vulnerability, affecting every component it matched; each
+    affected component lists the versions that fix it as `unaffected`."""
     refs = {c.get("bom-ref") for c in sbom.get("components") or [] if c.get("bom-ref")}
     vulns, order, hits = {}, [], set()
     for m in matches:
@@ -135,10 +147,15 @@ def annotate(sbom, matches):
                      "affects": []}
             if fix:
                 entry["recommendation"] = "Fixed in %s." % ", ".join(fix)
+            threat = _threat(v)
+            if threat:
+                entry["properties"] = threat
             vulns[vid] = entry
             order.append(vid)
         if ref not in {a["ref"] for a in vulns[vid]["affects"]}:
-            vulns[vid]["affects"].append({"ref": ref})
+            fixed = [{"version": str(x), "status": "unaffected"}
+                     for x in (v.get("fix") or {}).get("versions") or []]
+            vulns[vid]["affects"].append(dict({"ref": ref}, **({"versions": fixed} if fixed else {})))
             hits.add((vid, ref, severity))
     out = dict(sbom, vulnerabilities=[vulns[i] for i in order])
     summary = {k: 0 for k in SUMMARY + ("other",)}

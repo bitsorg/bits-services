@@ -23,17 +23,18 @@ SBOM = {"bomFormat": "CycloneDX", "specVersion": "1.6", "components": [
     "dependencies": [{"ref": "ROOT@cccc", "dependsOn": ["curl@aaaa", "zlib@bbbb"]}]}
 
 
-def match(vid, ref, severity, cvss=None, fix=None, related=None):
+def match(vid, ref, severity, cvss=None, fix=None, related=None, **threat):
     return {"artifact": {"id": ref},
             "vulnerability": {"id": vid, "severity": severity, "namespace": "nvd:cpe",
                               "dataSource": "https://nvd.nist.gov/vuln/detail/" + vid,
                               "description": "about " + vid, "urls": ["https://x/" + vid],
-                              "cvss": cvss or [], "fix": {"versions": fix or []}},
+                              "cvss": cvss or [], "fix": {"versions": fix or []}, **threat},
             "relatedVulnerabilities": related or []}
 
 
 MATCHES = [
-    match("CVE-1", "curl@aaaa", "Critical", fix=["8.1.0"],
+    match("CVE-1", "curl@aaaa", "Critical", fix=["8.1.0"], risk=78.75,
+          epss=[{"cve": "CVE-1", "epss": 0.9431}], knownExploited=[{"dateAdded": "2023-10-10"}],
           cvss=[{"version": "3.1", "vector": "CVSS:3.1/AV:N", "metrics": {"baseScore": 9.8}}]),
     match("CVE-1", "zlib@bbbb", "Critical"),            # one advisory, two packages
     match("CVE-2", "curl@aaaa", "Negligible"),
@@ -86,7 +87,12 @@ class ScannerTest(unittest.TestCase):
         self.assertEqual(out["dependencies"], SBOM["dependencies"])
         v = {x["id"]: x for x in out["vulnerabilities"]}
         self.assertEqual(sorted(v), ["CVE-1", "CVE-2"])
-        self.assertEqual(v["CVE-1"]["affects"], [{"ref": "curl@aaaa"}, {"ref": "zlib@bbbb"}])
+        self.assertEqual(v["CVE-1"]["affects"], [
+            {"ref": "curl@aaaa", "versions": [{"version": "8.1.0", "status": "unaffected"}]},
+            {"ref": "zlib@bbbb"}])                       # its own match names no fix
+        self.assertEqual(v["CVE-1"]["properties"], [{"name": "grype:risk", "value": "78.75"},
+            {"name": "grype:epss", "value": "0.94310"}, {"name": "grype:kev", "value": "2023-10-10"}])
+        self.assertNotIn("properties", v["CVE-2"])
         self.assertEqual(v["CVE-1"]["ratings"], [{"severity": "critical", "method": "CVSSv31",
                                                   "score": 9.8, "vector": "CVSS:3.1/AV:N"}])
         self.assertEqual(v["CVE-1"]["recommendation"], "Fixed in 8.1.0.")

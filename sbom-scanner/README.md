@@ -4,8 +4,11 @@ Matches the SBOMs of published bits builds with a vulnerability database
 ([grype](https://github.com/anchore/grype)) for the orchestrator. The worker
 sends each build's `sbom.cdx.json`; the service returns the same SBOM with a
 CycloneDX `vulnerabilities` section whose `affects` name the SBOM's own
-components, and counts by severity. The backend shows them in the console's
-Vulnerabilities page and in the SBOM report.
+components (with the versions that fix each, as `unaffected`), and counts by
+severity. Each vulnerability carries grype's risk score, EPSS and CISA KEV date
+as `grype:risk`, `grype:epss` and `grype:kev` properties. The backend shows them
+in the console's Vulnerabilities page and in the SBOM report, and plans upgrades
+from them.
 
 It holds no secret. It is on `scan-net` with the worker alone; its only traffic
 out is grype's database download (`grype.anchore.io`), refreshed every
