@@ -385,10 +385,13 @@ here is ours. It is not reachable from outside the host.
    firewall-cmd --get-zone-of-interface=docker0` should say `docker`).
 4. **Switch it on.** In `.env`: `BITS_CHAT_URL=http://host.docker.internal:11434`
    (and `BITS_CHAT_CONTEXT` if not 16384), then `docker compose up -d
-   bits-orchestrator bits-console-backend`. The worker must reach
-   `raw.githubusercontent.com`.
-5. **Check:** within a pass, `GET /ops/chat` (signed in) shows `docs` with about
-   600 sections and `"available": true`; the console's **Ask** page answers,
+   bits-orchestrator bits-console-backend`. The worker lists the repositories it
+   answers from and reads their markdown files: it must reach `api.github.com`,
+   `raw.githubusercontent.com` and `gitlab.cern.ch`. Unauthenticated, GitHub
+   allows 60 listings an hour from this host (shared with the backend's catalog
+   proxy); `BITS_GITHUB_TOKEN` (public read only, as the backend's) raises that.
+5. **Check:** within a pass, `GET /ops/chat` (signed in) shows `docs` with many
+   hundreds of sections and `"available": true`; the console's **Ask** page answers,
    and so does **Explain** on a failed build.
 6. **Evaluation**, by hand after a change of model, prompt or context, in the
    backend's container (it has the code and its dependencies):
@@ -399,7 +402,7 @@ here is ours. It is not reachable from outside the host.
    ```
 
    Without `--model` it measures only the docs search (seconds); with
-   `--judge`, all 224 cases take a while (two to five model calls each).
+   `--judge`, all the cases take a while (two to five model calls each).
 
 Nothing of a chat is kept but votes (90 days, `GET /ops/chat/feedback` for
 overall admins). Turning it off: `BITS_CHAT_URL=` and `docker compose up -d

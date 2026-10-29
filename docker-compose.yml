@@ -367,9 +367,11 @@ services:
       # (COMPOSE_PROFILES=scanner, then http://sbom-scanner:8080). Empty = off.
       BITS_ORCH_SCANNER_URL: "${BITS_ORCH_SCANNER_URL:-}"
       # The help chat (the backend's): set, the worker reads the docs it answers
-      # from, hourly from GitHub, into its index. It never calls the model.
+      # from, hourly from GitHub and GitLab, into its index. It never calls the model.
       BITS_CHAT_URL: "${BITS_CHAT_URL:-}"
       BITS_CHAT_DOCS: "${BITS_CHAT_DOCS:-}"
+      # Public-read only (as the backend's): GitHub's listings past 60 an hour.
+      BITS_GITHUB_TOKEN: "${BITS_GITHUB_TOKEN:-}"
     volumes:
       - orch-data:/orch
       - credential-sockets:/run/credentials-proxy:ro
