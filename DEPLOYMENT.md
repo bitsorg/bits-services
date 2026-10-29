@@ -404,6 +404,13 @@ here is ours. It is not reachable from outside the host.
    Without `--model` it measures only the docs search (seconds); with
    `--judge`, all the cases take a while (two to five model calls each).
 
+**Explain this failure** sends the model, besides what the orchestrator recorded,
+what changed since the last successful build of the package on that platform and, for the
+community's admins, the end of the failed jobs' logs and of `bits-build.log` or
+`bits-publish.log`, read from GitLab when asked (with the backend's GitLab token, as the
+worker reads them) and redacted. A model that can think (gemma4 can) thinks first there:
+answers take up to twice `BITS_CHAT_TIMEOUT_S`; `BITS_CHAT_EXPLAIN_THINK=0` turns it off.
+
 Nothing of a chat is kept but votes (90 days, `GET /ops/chat/feedback` for
 overall admins). Turning it off: `BITS_CHAT_URL=` and `docker compose up -d
 bits-orchestrator bits-console-backend`; the Ask page then says the chat is not

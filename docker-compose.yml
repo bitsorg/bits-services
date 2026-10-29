@@ -248,6 +248,8 @@ services:
       BITS_CHAT_MODEL: "${BITS_CHAT_MODEL:-gemma4:12b}"
       BITS_CHAT_CONTEXT: "${BITS_CHAT_CONTEXT:-16384}"
       BITS_CHAT_THINK: "${BITS_CHAT_THINK:-}"
+      # Explain this failure: the model thinks first when it can (1, the default; 0 = never).
+      BITS_CHAT_EXPLAIN_THINK: "${BITS_CHAT_EXPLAIN_THINK:-1}"
     # The host's Ollama, listening on the docker bridge (DEPLOYMENT.md, "The help chat").
     extra_hosts:
       - "host.docker.internal:host-gateway"
