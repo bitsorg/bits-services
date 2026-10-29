@@ -18,6 +18,8 @@ Status: **stub.** Filled in per phase of the implementation plan
 - `services-net` — backend ↔ public front (web.cern.ch reverse-proxy).
 - `monitoring-net` — the monitoring stack (Phase 4). Publishes only
   VictoriaMetrics `:8428` and its read-only CORS proxy `:8430`.
+- The help chat's model is not on a compose network: the backend reaches Ollama
+  on the host through `host.docker.internal` (the docker bridge), see below.
 
 ## Configure and run the signer (Phase 1c)
 
@@ -327,3 +329,79 @@ and scans (console-backend migration 13).
 
 Turning it off: `BITS_ORCH_SCANNER_URL=` and restart the worker; the scans
 already made stay readable.
+
+## The help chat
+
+The console's Ask page (and the app's) answers questions on using bits, and
+explains a failed build, with a local model: Ollama on this host, on its GPU.
+The browser asks the backend (`/ops/chat`, like every `/ops` call); the backend
+asks Ollama; the worker keeps the docs the answers come from (the bits docs and
+the community READMEs, read hourly from GitHub). Needs bits with the help chat
+(console-backend migration 24) and rootful docker (`docker info | grep -i
+rootless` shows nothing).
+
+Ollama has no authentication. Listening on the docker bridge, it is reachable
+from every container on this host's non-internal networks (not only the
+backend), which can use, pull or delete models: acceptable while every container
+here is ours. It is not reachable from outside the host.
+
+1. **Ollama, on the docker bridge**, which containers reach as
+   `host.docker.internal`. Find the bridge's address with `ip -4 addr show
+   docker0` (usually `172.17.0.1`; `"bip"` in `/etc/docker/daemon.json` pins
+   it), then `sudo systemctl edit ollama` and add:
+
+   ```
+   [Unit]
+   After=docker.service
+   Wants=docker.service
+
+   [Service]
+   Environment="OLLAMA_HOST=172.17.0.1:11434"
+   Environment="OLLAMA_CONTEXT_LENGTH=16384"
+   Environment="OLLAMA_FLASH_ATTENTION=1"
+   Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
+   Environment="OLLAMA_KEEP_ALIVE=1h"
+   ```
+
+   The address exists once docker runs (`After`); `Wants`, not `Requires`, so
+   a docker restart does not restart Ollama. Then `sudo systemctl restart
+   ollama`. The `ollama` command, run as your user, needs the same address from
+   now on: `export OLLAMA_HOST=172.17.0.1:11434` in your shell profile.
+2. **The model.** `ollama pull gemma4:12b` (if not there), `ollama run
+   gemma4:12b hello`, then `ollama ps`: CONTEXT 16384 and PROCESSOR
+   `100% GPU`. A CPU/GPU split means the context does not fit the card: set
+   8192 both here (`OLLAMA_CONTEXT_LENGTH`) and as `BITS_CHAT_CONTEXT` below,
+   since the backend asks for its own and a different one reloads the model.
+3. **The backend reaches it.** `docker compose up -d bits-console-backend` (it
+   gets `host.docker.internal`), then
+
+   ```
+   docker compose exec bits-console-backend python3 -c "import urllib.request as u; print(u.urlopen('http://host.docker.internal:11434/api/tags', timeout=5).read()[:200])"
+   ```
+
+   lists the model. *Connection refused*: Ollama is not listening on the bridge
+   (`ss -ltn | grep 11434`). *Timed out* or *no route to host*: the host's
+   firewall drops the bridge's traffic to the host (with firewalld, `sudo
+   firewall-cmd --get-zone-of-interface=docker0` should say `docker`).
+4. **Switch it on.** In `.env`: `BITS_CHAT_URL=http://host.docker.internal:11434`
+   (and `BITS_CHAT_CONTEXT` if not 16384), then `docker compose up -d
+   bits-orchestrator bits-console-backend`. The worker must reach
+   `raw.githubusercontent.com`.
+5. **Check:** within a pass, `GET /ops/chat` (signed in) shows `docs` with about
+   600 sections and `"available": true`; the console's **Ask** page answers,
+   and so does **Explain** on a failed build.
+6. **Evaluation**, by hand after a change of model, prompt or context, in the
+   backend's container (it has the code and its dependencies):
+
+   ```
+   docker compose exec bits-console-backend python3 /src/console-backend/chat-eval/run.py --url http://host.docker.internal:11434 --model gemma4:12b --judge --out /tmp/report.md
+   docker compose exec -T bits-console-backend cat /tmp/report.md > report.md
+   ```
+
+   Without `--model` it measures only the docs search (seconds); with
+   `--judge`, all 224 cases take a while (two to five model calls each).
+
+Nothing of a chat is kept but votes (90 days, `GET /ops/chat/feedback` for
+overall admins). Turning it off: `BITS_CHAT_URL=` and `docker compose up -d
+bits-orchestrator bits-console-backend`; the Ask page then says the chat is not
+set up.

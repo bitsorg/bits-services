@@ -242,6 +242,15 @@ services:
       # secrets are pushed and checked; then BITS_FORGE_OPS_TOKEN and
       # BITS_ADMIN_RESOLVE_TOKEN can go. Empty = the tokens above, as before.
       BITS_CRED_PROXY_AGENT_SOCKET: "${BITS_CRED_PROXY_AGENT_SOCKET:-}"
+      # The help chat: Ollama on this host (http://host.docker.internal:11434).
+      # Empty = no chat. Set with the worker's, which keeps its docs index.
+      BITS_CHAT_URL: "${BITS_CHAT_URL:-}"
+      BITS_CHAT_MODEL: "${BITS_CHAT_MODEL:-gemma4:12b}"
+      BITS_CHAT_CONTEXT: "${BITS_CHAT_CONTEXT:-16384}"
+      BITS_CHAT_THINK: "${BITS_CHAT_THINK:-}"
+    # The host's Ollama, listening on the docker bridge (DEPLOYMENT.md, "The help chat").
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "443:8443"          # https on the backend's own origin
     volumes:
@@ -357,6 +366,10 @@ services:
       # Vulnerability scans of the builds' SBOMs: the sbom-scanner below
       # (COMPOSE_PROFILES=scanner, then http://sbom-scanner:8080). Empty = off.
       BITS_ORCH_SCANNER_URL: "${BITS_ORCH_SCANNER_URL:-}"
+      # The help chat (the backend's): set, the worker reads the docs it answers
+      # from, hourly from GitHub, into its index. It never calls the model.
+      BITS_CHAT_URL: "${BITS_CHAT_URL:-}"
+      BITS_CHAT_DOCS: "${BITS_CHAT_DOCS:-}"
     volumes:
       - orch-data:/orch
       - credential-sockets:/run/credentials-proxy:ro
