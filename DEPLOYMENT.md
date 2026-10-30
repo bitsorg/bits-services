@@ -18,8 +18,9 @@ Status: **stub.** Filled in per phase of the implementation plan
 - `services-net` — backend ↔ public front (web.cern.ch reverse-proxy).
 - `monitoring-net` — the monitoring stack (Phase 4). Publishes only
   VictoriaMetrics `:8428` and its read-only CORS proxy `:8430`.
-- The help chat's model is not on a compose network: the backend reaches Ollama
-  on the host through `host.docker.internal` (the docker bridge), see below.
+- The help chat's model is not on a compose network: the backend (and, for the
+  embedding model, the worker) reaches Ollama on the host through
+  `host.docker.internal` (the docker bridge), see below.
 
 ## Configure and run the signer (Phase 1c)
 
@@ -390,10 +391,17 @@ here is ours. It is not reachable from outside the host.
    `raw.githubusercontent.com` and `gitlab.cern.ch`. Unauthenticated, GitHub
    allows 60 listings an hour from this host (shared with the backend's catalog
    proxy); `BITS_GITHUB_TOKEN` (public read only, as the backend's) raises that.
-5. **Check:** within a pass, `GET /ops/chat` (signed in) shows `docs` with many
-   hundreds of sections and `"available": true`; the console's **Ask** page answers,
-   and so does **Explain** on a failed build.
-6. **Evaluation**, by hand after a change of model, prompt or context, in the
+5. **Search by meaning** (recommended): questions then find the docs by meaning
+   as well as by their words. `ollama pull nomic-embed-text` (about 300 MB of the
+   GPU beside the chat model), `BITS_CHAT_EMBED_MODEL=nomic-embed-text` in `.env`,
+   then `docker compose up -d bits-orchestrator bits-console-backend`. The worker
+   gives each section a vector, a few passes the first time; another model makes
+   them again. The worker must reach Ollama too: the check of step 3, run in
+   `bits-orchestrator`.
+6. **Check:** within a pass, `GET /ops/chat` (signed in) shows `docs` with many
+   hundreds of sections (and as many `vectors`, with step 5) and `"available": true`;
+   the console's **Ask** page answers, and so does **Explain** on a failed build.
+7. **Evaluation**, by hand after a change of model, prompt or context, in the
    backend's container (it has the code and its dependencies):
 
    ```

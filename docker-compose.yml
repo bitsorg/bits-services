@@ -250,6 +250,8 @@ services:
       BITS_CHAT_THINK: "${BITS_CHAT_THINK:-}"
       # Explain this failure: the model thinks first when it can (1, the default; 0 = never).
       BITS_CHAT_EXPLAIN_THINK: "${BITS_CHAT_EXPLAIN_THINK:-1}"
+      # Questions find the docs by meaning too: an Ollama embedding model. Empty = by words.
+      BITS_CHAT_EMBED_MODEL: "${BITS_CHAT_EMBED_MODEL:-}"
     # The host's Ollama, listening on the docker bridge (DEPLOYMENT.md, "The help chat").
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -369,11 +371,16 @@ services:
       # (COMPOSE_PROFILES=scanner, then http://sbom-scanner:8080). Empty = off.
       BITS_ORCH_SCANNER_URL: "${BITS_ORCH_SCANNER_URL:-}"
       # The help chat (the backend's): set, the worker reads the docs it answers
-      # from, hourly from GitHub and GitLab, into its index. It never calls the model.
+      # from, hourly from GitHub and GitLab, into its index; with an embedding model
+      # it also asks that model (never the chat's) for the sections' vectors.
       BITS_CHAT_URL: "${BITS_CHAT_URL:-}"
       BITS_CHAT_DOCS: "${BITS_CHAT_DOCS:-}"
+      BITS_CHAT_EMBED_MODEL: "${BITS_CHAT_EMBED_MODEL:-}"
       # Public-read only (as the backend's): GitHub's listings past 60 an hour.
       BITS_GITHUB_TOKEN: "${BITS_GITHUB_TOKEN:-}"
+    # The host's Ollama, for the embedding model (DEPLOYMENT.md, "The help chat").
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - orch-data:/orch
       - credential-sockets:/run/credentials-proxy:ro
