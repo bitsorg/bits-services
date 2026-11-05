@@ -101,3 +101,34 @@ class UnlockingTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RealPassphraseTest(unittest.TestCase):
+    """The helper's lockout counts WrongPassphrase: both real paths raise it."""
+
+    def test_both_raise_wrong_passphrase(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "k.enc.pem")
+            with open(path, "wb") as f:
+                f.write(Ed25519PrivateKey.generate().private_bytes(
+                    s.Encoding.PEM, s.PrivateFormat.PKCS8, s.BestAvailableEncryption(b"right")))
+            with self.assertRaises(ul.WrongPassphrase):
+                ul.decrypt_signing_seed(path, b"wrong")
+            ss.FILE = os.path.join(d, "service-secrets.enc")
+            ss.save(b"right-pass", {"a": "b"})
+            with self.assertRaises(ul.WrongPassphrase):
+                ul.load_service_secrets(b"wrong-pass", ss.FILE)
+            with self.assertRaises(ul.UnlockError) as e:
+                ul.decrypt_signing_seed(os.path.join(d, "missing.pem"), b"x")
+            self.assertNotIsInstance(e.exception, ul.WrongPassphrase)
+
+    def test_push_error_keeps_the_detail_apart(self):
+        real = ul._compose
+        ul._compose = lambda args, value=None: (1, "", "error: bad value " + (value or ""))
+        try:
+            with self.assertRaises(ul.UnlockError) as e:
+                ul.push("slot", "s3cr3t-value", "credentials-proxy")
+        finally:
+            ul._compose = real
+        self.assertEqual(str(e.exception), "push slot into credentials-proxy failed (exit 1)")
+        self.assertNotIn("s3cr3t", str(e.exception))

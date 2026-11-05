@@ -40,28 +40,42 @@ print(json.load(urllib.request.urlopen(req))["keyid"])
 
 
 class UnlockError(Exception):
-    """A step failed; the message names it, never a passphrase or a secret."""
+    """A step failed; the message names it, never a value. detail: what docker said,
+    shown at the terminal only (the host helper does not pass it on)."""
+
+    def __init__(self, message, detail=""):
+        super().__init__(message)
+        self.detail = detail
+
+
+class WrongPassphrase(UnlockError):
+    """The passphrase did not decrypt (counted by the host helper's lockout)."""
 
 
 def _compose(args, value=None):
     try:
-        r = subprocess.run(["docker", "compose"] + args, cwd=DIR, capture_output=True,
+        r = subprocess.run(["docker", "compose"] + args, cwd=DIR, capture_output=True, timeout=120,
                            input=value.encode() if value is not None else None)
     except FileNotFoundError:
         raise UnlockError("docker is not installed or not on PATH")
+    except subprocess.TimeoutExpired:
+        raise UnlockError("docker compose %s did not answer in 120 s" % args[0])
     return r.returncode, r.stdout.decode(), r.stderr.decode()
 
 
 def decrypt_signing_seed(enc_path, passphrase):
     """The raw Ed25519 seed of the encrypted PEM, base64."""
     from cryptography.hazmat.primitives import serialization as s
-    with open(enc_path, "rb") as f:
-        pem = f.read()
+    try:
+        with open(enc_path, "rb") as f:
+            pem = f.read()
+    except OSError:
+        raise UnlockError("no encrypted key at: %s (run encrypt-signing-key.sh first)" % enc_path)
     try:
         key = s.load_pem_private_key(pem, password=passphrase)
         raw = key.private_bytes(s.Encoding.Raw, s.PrivateFormat.Raw, s.NoEncryption())
     except (ValueError, TypeError):
-        raise UnlockError("wrong passphrase, or not an encrypted Ed25519 key")
+        raise WrongPassphrase("wrong passphrase, or not an encrypted Ed25519 key")
     return base64.b64encode(raw).decode()
 
 
@@ -70,7 +84,7 @@ def push(slot, value, service):
     code, out, err = _compose(["exec", "-T", service, "security-proxy", "push", slot,
                                "--socket", INGEST], value)
     if code:
-        raise UnlockError("push %s into %s failed: %s" % (slot, service, (err or out).strip()[:300]))
+        raise UnlockError("push %s into %s failed (exit %d)" % (slot, service, code), (err or out).strip()[:300])
     return out
 
 
@@ -78,7 +92,7 @@ def signing_key_id(service=SIGNER, route=SIGN_ROUTE):
     """The full key id the signer has loaded, read through its sign route."""
     code, keyid, err = _compose(["exec", "-T", service, "python3", "-", route, AGENT], PUBKEY)
     if code:
-        raise UnlockError("the sign route did not answer: %s" % err.strip()[-300:])
+        raise UnlockError("the sign route did not answer (exit %d)" % code, err.strip()[-300:])
     return keyid.strip()
 
 
@@ -105,7 +119,7 @@ def load_service_secrets(passphrase, path=SECRETS_FILE):
         plain = AESGCM(_scrypt(passphrase, salt, box["n"], box["r"], box["p"])).decrypt(
             nonce, base64.b64decode(box["ct"]), b"service-secrets/1")
     except Exception:
-        raise UnlockError("wrong passphrase, or %s is damaged" % path)
+        raise WrongPassphrase("wrong passphrase, or %s is damaged" % path)
     return json.loads(plain)
 
 
@@ -193,7 +207,7 @@ def main(argv):
         print(">> verifying the loaded key via the sign route /pubkey ...", flush=True)
         keyid16 = signing_key_id()[:16]
     except UnlockError as e:
-        sys.exit(str(e))
+        sys.exit(str(e) + (": " + e.detail if e.detail else ""))
     print("   loaded key_id (16) = %s" % keyid16)
     if expect and keyid16 != expect:
         sys.exit("ERROR: loaded key_id %s != expected %s" % (keyid16, expect))

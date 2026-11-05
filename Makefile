@@ -6,7 +6,7 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help init config build audit-token up down ps status logs unlock secret credentials-check test clean monitoring monitoring-check
+.PHONY: help init config build audit-token up down ps status logs unlock secret credentials-check helper-unit test clean monitoring monitoring-check
 
 # The monitoring stack (Phase 4), started on its own by `make monitoring`.
 MON_SERVICES := victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
@@ -54,6 +54,9 @@ secret:  ## Store a service secret: make secret SLOT=gitlab-read (prompts the va
 
 credentials-check:  ## GitLab and the store through the credentials proxy, from the worker
 	python3 tools/service-secrets.py check
+
+helper-unit:  ## Print the bits-admin-helper systemd unit for this checkout
+	@sed "s|@DIR@|$(CURDIR)|g" tools/bits-admin-helper.service
 
 test:  ## Functional wiring check (proxy up, backend https/healthz, backend→proxy)
 	bash scripts/functional-test.sh

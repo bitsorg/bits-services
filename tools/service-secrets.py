@@ -53,7 +53,7 @@ def load(passphrase):
     try:
         return unlocking.load_service_secrets(passphrase, FILE)
     except UnlockError as e:
-        sys.exit(str(e))
+        sys.exit(str(e) + (": " + e.detail if e.detail else ""))
 
 
 def save(passphrase, secrets):

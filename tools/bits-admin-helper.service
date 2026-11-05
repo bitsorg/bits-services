@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# bits-admin-helper: `make helper-unit | sudo tee /etc/systemd/system/bits-admin-helper.service`
+# fills in this checkout's path; then systemctl daemon-reload && systemctl enable --now bits-admin-helper.
+[Unit]
+Description=bits-admin host helper (status, unlock) for @DIR@
+After=docker.service
+Requires=docker.service
+
+[Service]
+ExecStart=/usr/bin/python3 @DIR@/tools/bits-admin-helper.py serve
+WorkingDirectory=@DIR@
+# Root for docker compose, running this checkout's code: keep the checkout writable only
+# by accounts that already have docker (root-equivalent). Socket group: bits-admin's, 10004.
+Group=10004
+Environment=BITS_ADMIN_HELPER_GID=10004
+RuntimeDirectory=bits-admin-helper
+RuntimeDirectoryMode=0750
+# Kept across restarts: bits-admin bind-mounts this directory.
+RuntimeDirectoryPreserve=yes
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=yes
+PrivateTmp=yes
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
