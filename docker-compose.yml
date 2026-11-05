@@ -440,7 +440,7 @@ services:
       BITS_ADMIN_SOCKET: /run/bits-admin/admin.sock
       BITS_ADMIN_CODE_FILE: /run/bits-admin/setup-code
       BITS_ADMIN_HELPER_SOCKET: /run/bits-admin-helper/helper.sock
-      BITS_ADMIN_ORIGINS: "${BITS_ADMIN_ORIGINS:-http://localhost:8800}"
+      BITS_ADMIN_ORIGINS: "${BITS_ADMIN_ORIGINS:-http://bits-admin.localhost:8800}"
       BITS_ADMIN_SECURITY_KEYS_ONLY: "${BITS_ADMIN_SECURITY_KEYS_ONLY:-}"
       BITS_ADMIN_DATA: /var/lib/bits-admin
     volumes:

@@ -38,3 +38,4 @@ chmod 0700 .
 cd "$DIR"
 echo "$RUN_DIR and $DIR/admin-data ready. Admins: usermod -aG bits-admin <user> (then log in again);"
 echo "tunnel: ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:8800:$RUN_DIR/admin.sock <this host>"
+echo "then open http://bits-admin.localhost:8800 (make admin-code prints the sign-in code)"
