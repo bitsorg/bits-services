@@ -17,7 +17,8 @@ case " $* " in
               [ "${FAKE_ANSWER_AT:-0}" -gt 0 ] && [ "$n" -ge "$FAKE_ANSWER_AT" ] ;;
 esac
 '''
-SHIMS = {"stat": 'echo "${FAKE_STAT:-bits-admin:bits-admin}"', "sleep": ":"}
+SHIMS = {"stat": 'case "$3" in admin-data) echo "${FAKE_DATA_STAT:-bits-admin:bits-admin}" ;;\n'
+                 '  *) echo "${FAKE_STAT:-bits-admin:bits-admin}" ;; esac', "sleep": ":"}
 
 
 class AdminUpTest(unittest.TestCase):
@@ -86,10 +87,11 @@ class AdminUpTest(unittest.TestCase):
             self.assertEqual(self.run_probe(stale), 1)
 
     def test_needs_admin_install_first(self):
-        r, calls, _ = self.run_up(FAKE_STAT="root:root")
-        self.assertEqual(r.returncode, 1)
-        self.assertEqual(calls, [])
-        self.assertIn("sudo make admin-install", r.stderr)
+        for stat in ({"FAKE_STAT": "root:root"}, {"FAKE_DATA_STAT": "pbuncic:pbuncic"}):
+            r, calls, _ = self.run_up(**stat)
+            self.assertEqual(r.returncode, 1)
+            self.assertEqual(calls, [])
+            self.assertIn("sudo make admin-install", r.stderr)
 
 
 if __name__ == "__main__":

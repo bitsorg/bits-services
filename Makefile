@@ -61,7 +61,7 @@ helper-unit:  ## Print the bits-admin-helper systemd unit for this checkout
 helper-install:  ## As root: the helper's group if missing, its unit for this checkout, started
 	bash scripts/helper-install.sh
 
-admin-install:  ## As root: the bits-admin group and user if missing, /run/bits-admin
+admin-install:  ## As root: the bits-admin group and user if missing, /run/bits-admin, admin-data/
 	bash scripts/admin-install.sh
 
 admin-up:  ## Start bits-admin and wait until it answers on /run/bits-admin/admin.sock

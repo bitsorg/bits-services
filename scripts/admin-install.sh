@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # admin-install.sh — run as root (sudo make admin-install): the bits-admin group (the
-# admins) and system user (the container), 10003, when missing, and /run/bits-admin
-# for its socket and setup code, now and at every boot (tmpfiles.d). Safe to rerun.
+# admins) and system user (the container), 10003, when missing, /run/bits-admin for
+# its socket and setup code, now and at every boot (tmpfiles.d), and admin-data/ for
+# its passkeys. Safe to rerun.
 
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -26,5 +27,14 @@ mv -f "$tmp" "$TMPFILES"
 systemd-tmpfiles --create "$TMPFILES"
 [[ "$(stat -c '%a %U:%G' "$RUN_DIR")" == "750 bits-admin:bits-admin" ]] || {
   echo "$RUN_DIR is $(stat -c '%a %U:%G' "$RUN_DIR"), not 750 bits-admin:bits-admin" >&2; exit 1; }
-echo "$RUN_DIR ready. Admins: usermod -aG bits-admin <user> (then log in again);"
+
+# The passkeys and the encrypted passphrases (never a passphrase): the container's only.
+# chown/chmod act on the directory entered, so a symlink swapped in cannot redirect them.
+mkdir -p admin-data
+cd admin-data
+[[ "$(pwd -P)" == "$DIR/admin-data" ]] || { echo "admin-data is not a plain directory; refusing" >&2; exit 1; }
+chown bits-admin:bits-admin .
+chmod 0700 .
+cd "$DIR"
+echo "$RUN_DIR and $DIR/admin-data ready. Admins: usermod -aG bits-admin <user> (then log in again);"
 echo "tunnel: ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:8800:$RUN_DIR/admin.sock <this host>"

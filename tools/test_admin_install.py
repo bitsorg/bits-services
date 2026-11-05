@@ -2,12 +2,12 @@
 """Tests for scripts/admin-install.sh, with getent, groupadd, systemd-tmpfiles, stat and id stood in."""
 
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
 
-SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts",
-                      "admin-install.sh")
+SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
 SHIMS = {
     "id": 'echo "${FAKE_UID:-0}"',
     "getent": 'f=$FAKE_GROUPS; [ "$1" = passwd ] && f=$FAKE_PASSWD; grep -E "^$2:|:$2:" "$f" || exit 2',
@@ -15,6 +15,7 @@ SHIMS = {
     "useradd": 'echo "useradd $*" >> "$FAKE_LOG"; echo "${@: -1}:x:$3:" >> "$FAKE_PASSWD"',
     "systemd-tmpfiles": 'echo "systemd-tmpfiles $*" >> "$FAKE_LOG"',
     "stat": 'echo "${FAKE_STAT:-750 bits-admin:bits-admin}"',
+    "chown": 'echo "chown $*" >> "$FAKE_LOG"',
 }
 
 
@@ -35,11 +36,22 @@ class AdminInstallTest(unittest.TestCase):
             passwd = os.path.join(d, "passwd")
             with open(passwd, "w") as f:
                 f.write(users)
+            checkout = os.path.realpath(os.path.join(d, "checkout"))
+            os.makedirs(os.path.join(checkout, "scripts"))
+            for name in ("admin-install.sh", "lib-host.sh"):
+                shutil.copy(os.path.join(SCRIPTS, name), os.path.join(checkout, "scripts"))
+            self.data_dir = os.path.join(checkout, "admin-data")
+            self.link_target = os.path.join(d, "elsewhere")
+            os.makedirs(self.link_target, mode=0o755)
+            setup = extra.pop("data_setup", None)
+            if setup:
+                setup(self)
             env = dict(os.environ, PATH=bin_dir + ":" + os.environ["PATH"], FAKE_GROUPS=group_file,
                        FAKE_PASSWD=passwd,
                        FAKE_LOG=log, FAKE_UID=uid, TMPFILES_DIR=conf_dir, ADMIN_RUN_DIR="/run/bits-admin",
                        **extra)
-            r = subprocess.run(["bash", SCRIPT], env=env, capture_output=True, text=True)
+            r = subprocess.run(["bash", os.path.join(checkout, "scripts", "admin-install.sh")],
+                               env=env, capture_output=True, text=True)
             conf = os.path.join(conf_dir, "bits-admin.conf")
             text = ""
             if os.path.exists(conf):
@@ -47,6 +59,10 @@ class AdminInstallTest(unittest.TestCase):
                     text = f.read()
             with open(log) as f:
                 calls = f.read()
+            self.data_mode = (oct(os.stat(self.data_dir).st_mode & 0o777)
+                              if os.path.isdir(self.data_dir) and not os.path.islink(self.data_dir) else None)
+            self.target_mode = oct(os.stat(self.link_target).st_mode & 0o777)
+            self.kept = os.path.exists(os.path.join(self.data_dir, "passkeys.json"))
             self.assertEqual([n for n in os.listdir(conf_dir) if n.startswith(".")], [])
             return r, calls, text
 
@@ -58,6 +74,25 @@ class AdminInstallTest(unittest.TestCase):
         self.assertEqual(conf, "d /run/bits-admin 0750 bits-admin bits-admin -\n")
         self.assertIn("systemd-tmpfiles --create", calls)
         self.assertIn("usermod -aG bits-admin", r.stdout)
+        self.assertIn("chown bits-admin:bits-admin .", calls)
+        self.assertEqual(self.data_mode, "0o700")
+
+    def test_a_rerun_tightens_the_data_directory_and_keeps_its_files(self):
+        def existing(t):
+            os.makedirs(t.data_dir, mode=0o755)
+            open(os.path.join(t.data_dir, "passkeys.json"), "w").close()
+        r, _, _ = self.run_install("bits-admin:x:10003:\n", users="bits-admin:x:10003:\n",
+                                   data_setup=existing)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.data_mode, self.kept), ("0o700", True))
+
+    def test_refuses_a_symlinked_data_directory(self):
+        r, calls, _ = self.run_install("bits-admin:x:10003:\n", users="bits-admin:x:10003:\n",
+                                       data_setup=lambda t: os.symlink(t.link_target, t.data_dir))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not a plain directory; refusing", r.stderr)
+        self.assertNotIn("chown", calls)
+        self.assertEqual(self.target_mode, "0o755")
 
     def test_keeps_a_matching_group_and_user(self):
         r, calls, _ = self.run_install("bits-admin:x:10003:pbuncic\n", users="bits-admin:x:10003:\n")

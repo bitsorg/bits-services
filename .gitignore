@@ -28,3 +28,6 @@ config/
 
 # monitoring data (MONITORING_DATA_DIR default)
 /data/
+
+# bits-admin's passkeys and encrypted passphrases (sudo make admin-install)
+/admin-data/

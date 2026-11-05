@@ -14,8 +14,10 @@ TRIES="${ADMIN_WAIT_TRIES:-15}"
 ERR="$(mktemp)"
 trap 'rm -f "$ERR"' EXIT
 
-[[ "$(stat -c %U:%G "$RUN_DIR" 2>/dev/null)" == bits-admin:bits-admin ]] \
-  || { echo "first: sudo make admin-install" >&2; exit 1; }
+for d in "$RUN_DIR" admin-data; do
+  [[ "$(stat -c %U:%G "$d" 2>/dev/null)" == bits-admin:bits-admin ]] \
+    || { echo "first: sudo make admin-install" >&2; exit 1; }
+done
 $COMPOSE --profile admin up -d bits-admin || exit 1
 
 for ((i = 0; i < TRIES; i++)); do

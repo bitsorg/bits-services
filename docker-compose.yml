@@ -431,7 +431,8 @@ services:
     security_opt:
       - no-new-privileges:true
     # Its own user and group, 10003 (sudo make admin-install): /run/bits-admin is its,
-    # the admins (the group) open the socket and read the setup code there.
+    # the admins (the group) open the socket and read the setup code there;
+    # admin-data/ (passkeys, encrypted passphrases) is its alone.
     user: "10003:10003"
     group_add:
       - "10004"                 # bits-admin-helper: may ask the host helper
@@ -440,8 +441,14 @@ services:
       BITS_ADMIN_CODE_FILE: /run/bits-admin/setup-code
       BITS_ADMIN_HELPER_SOCKET: /run/bits-admin-helper/helper.sock
       BITS_ADMIN_ORIGINS: "${BITS_ADMIN_ORIGINS:-http://localhost:8800}"
+      BITS_ADMIN_DATA: /var/lib/bits-admin
     volumes:
       - /run/bits-admin:/run/bits-admin
+      - type: bind                # never created by Docker (it would be root's)
+        source: ./admin-data
+        target: /var/lib/bits-admin
+        bind:
+          create_host_path: false
       - /run/bits-admin-helper:/run/bits-admin-helper
 
   # The outside copy of the orchestrator's audit chain (audit-log/): it keeps
