@@ -31,7 +31,6 @@ value at once; the services do not restart.
 
 import argparse
 import base64
-import datetime
 import getpass
 import json
 import os
@@ -39,15 +38,9 @@ import subprocess
 import sys
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
-DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FILE = os.environ.get("SERVICE_SECRETS", os.path.join(DIR, "secrets", "service-secrets.enc"))
-SERVICE = os.environ.get("CREDENTIALS_PROXY_SERVICE", "credentials-proxy")
-# The store writer (M8a): the store's keypair goes there, out of the backend's reach.
-WRITER = os.environ.get("STORE_WRITER_SERVICE", "store-writer")
-INGEST = "/run/security-proxy-ingest/ingest.sock"
-CERT_SLOT = "client-cert"
+import unlocking
+from unlocking import DIR, SECRETS_FILE as FILE, UnlockError, _env_file, _scrypt as _key
 # .env variables `import-env` takes, by slot.
 # gitlab-read as the services read today: with the read token, else the ops token.
 FROM_ENV = {"gitlab-read": ("BITS_FORGE_READ_TOKEN", "BITS_FORGE_OPS_TOKEN"),
@@ -56,21 +49,11 @@ FROM_ENV = {"gitlab-read": ("BITS_FORGE_READ_TOKEN", "BITS_FORGE_OPS_TOKEN"),
             "gitlab-mirror": ("BITS_FORGE_MIRROR_TOKEN",)}
 
 
-def _key(passphrase, salt, n=2 ** 15, r=8, p=1):
-    return Scrypt(salt=salt, length=32, n=n, r=r, p=p).derive(passphrase)
-
-
 def load(passphrase):
-    if not os.path.exists(FILE):
-        return {}
-    box = json.load(open(FILE))
-    salt, nonce = base64.b64decode(box["salt"]), base64.b64decode(box["nonce"])
     try:
-        plain = AESGCM(_key(passphrase, salt, box["n"], box["r"], box["p"])).decrypt(
-            nonce, base64.b64decode(box["ct"]), b"service-secrets/1")
-    except Exception:
-        sys.exit("wrong passphrase, or %s is damaged" % FILE)
-    return json.loads(plain)
+        return unlocking.load_service_secrets(passphrase, FILE)
+    except UnlockError as e:
+        sys.exit(str(e))
 
 
 def save(passphrase, secrets):
@@ -107,62 +90,6 @@ def _value(slot):
     if not v:
         sys.exit("empty value")
     return v
-
-
-def _env_file():
-    out = {}
-    path = os.path.join(DIR, ".env")
-    if os.path.exists(path):
-        for line in open(path):
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                out[k.strip()] = v.strip().strip("'\"")
-    return out
-
-
-def _throwaway_cert():
-    """A self-signed client certificate for the proxy's TLS client: required by
-    the proxy, asked for by none of these upstreams, never written to disk."""
-    from cryptography import x509
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import ec
-    from cryptography.x509.oid import NameOID
-    key = ec.generate_private_key(ec.SECP256R1())
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "bits credentials proxy")])
-    now = datetime.datetime.now(datetime.timezone.utc)
-    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
-            .public_key(key.public_key()).serial_number(x509.random_serial_number())
-            .not_valid_before(now - datetime.timedelta(days=1))
-            .not_valid_after(now + datetime.timedelta(days=3650))
-            .sign(key, hashes.SHA256()))
-    return (cert.public_bytes(serialization.Encoding.PEM)
-            + key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                                serialization.NoEncryption())).decode()
-
-
-def _running(service):
-    r = subprocess.run(["docker", "compose", "ps", "-q", "--status", "running", service],
-                       cwd=DIR, capture_output=True)
-    return r.returncode == 0 and bool(r.stdout.strip())
-
-
-def _writer_configured():
-    """True when the store writer has a config: then s3-* slots must go there, not quietly
-    into the credentials proxy."""
-    d = os.environ.get("STORE_WRITER_CONFIG_DIR") or _env_file().get("STORE_WRITER_CONFIG_DIR") \
-        or "./config/store-writer"
-    return os.path.isfile(os.path.join(DIR, d, "config.json"))
-
-
-def _push(slot, value, service=SERVICE):
-    r = subprocess.run(["docker", "compose", "exec", "-T", service, "security-proxy", "push",
-                        slot, "--socket", INGEST], input=value.encode(), cwd=DIR,
-                       capture_output=True)
-    if r.returncode:
-        sys.exit("push %s into %s failed: %s" % (slot, service,
-                                                 (r.stderr or r.stdout).decode().strip()[:300]))
-    return r.stdout.decode()
 
 
 CHECK = r'''
@@ -261,25 +188,10 @@ def main():
         print("Next: make unlock; check; then set BITS_CRED_PROXY_AGENT_SOCKET in .env and"
               " remove those variables.")
     elif a.command == "push":
-        if not secrets:
-            sys.exit("no service secrets yet (tools/service-secrets.py set <slot>)")
-        # (A new client certificate makes the proxy rebuild its HTTPS client:
-        # requests in flight through it are cut, and retried by the services.)
-        writer = _running(WRITER)
-        if not writer and _writer_configured() and any(k.startswith("s3-") for k in secrets):
-            sys.exit("%s is configured but not running: start it first"
-                     " (docker compose --profile store up -d %s), then push again"
-                     % (WRITER, WRITER))
-        for service in (SERVICE, WRITER) if writer else (SERVICE,):
-            out = _push(CERT_SLOT, _throwaway_cert(), service)
-            if "tls: ready" not in out:
-                sys.exit("%s did not take the client certificate: %s" % (service, out.strip()))
-        where = {}
-        for slot in sorted(secrets):
-            service = (WRITER if writer and (slot.startswith("s3-") or slot == "gitlab-mirror")
-                       else SERVICE)
-            _push(slot, secrets[slot], service)
-            where.setdefault(service, []).append(slot)
+        try:
+            where = unlocking.push_service_secrets(secrets)
+        except UnlockError as e:
+            sys.exit(str(e))
         for service, slots in sorted(where.items()):
             print(">> pushed %d service secret(s) into %s: %s" % (len(slots), service,
                                                                  ", ".join(slots)))
