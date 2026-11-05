@@ -97,6 +97,21 @@ class HelperTest(unittest.TestCase):
             self.assertNotIn("wrong-pass-7", text)
             self.assertNotIn("forged line", text)
 
+    def test_the_group_must_match(self):
+        real = helper.GROUP, helper.GID
+        try:
+            helper.GROUP = "no-such-group-here"
+            with self.assertRaises(SystemExit):
+                helper.socket_gid()
+            import grp as g
+            helper.GROUP, helper.GID = g.getgrgid(os.getgid()).gr_name, os.getgid() + 1
+            with self.assertRaises(SystemExit):
+                helper.socket_gid()
+            helper.GID = os.getgid()
+            self.assertEqual(helper.socket_gid(), os.getgid())
+        finally:
+            helper.GROUP, helper.GID = real
+
     def _ask(self, path, raw):
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
             c.settimeout(5)

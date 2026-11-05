@@ -10,8 +10,9 @@ Requires=docker.service
 ExecStart=/usr/bin/python3 @DIR@/tools/bits-admin-helper.py serve
 WorkingDirectory=@DIR@
 # Root for docker compose, running this checkout's code: keep the checkout writable only
-# by accounts that already have docker (root-equivalent). Socket group: bits-admin's, 10004.
-Group=10004
+# by accounts that already have docker (root-equivalent). The socket's group, for the
+# bits-admin container alone: sudo groupadd --system --gid 10004 bits-admin-helper
+Group=bits-admin-helper
 Environment=BITS_ADMIN_HELPER_GID=10004
 RuntimeDirectory=bits-admin-helper
 RuntimeDirectoryMode=0750

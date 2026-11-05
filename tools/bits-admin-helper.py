@@ -20,6 +20,7 @@ and the outcome, never a passphrase. By hand, as root:
 
 import collections
 import getpass
+import grp
 import json
 import os
 import socket
@@ -31,7 +32,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import unlocking  # noqa: E402
 
 SOCKET = os.environ.get("BITS_ADMIN_HELPER_SOCKET", "/run/bits-admin-helper/helper.sock")
-GID = int(os.environ.get("BITS_ADMIN_HELPER_GID", "10004"))  # the bits-admin container's
+GROUP = os.environ.get("BITS_ADMIN_HELPER_GROUP", "bits-admin-helper")
+GID = int(os.environ.get("BITS_ADMIN_HELPER_GID", "10004"))  # the one bits-admin's container joins
 MAX_REQUEST = 4096
 TIMEOUT = 15
 FAILURES, WINDOW = 5, 600  # wrong passphrases allowed per window (seconds)
@@ -131,6 +133,17 @@ def _read(conn):
     return json.loads(data.decode())
 
 
+def socket_gid():
+    """The helper group's gid, which must be the one the bits-admin container joins."""
+    try:
+        gid = grp.getgrnam(GROUP).gr_gid
+    except KeyError:
+        sys.exit("no group %s: sudo groupadd --system --gid %d %s" % (GROUP, GID, GROUP))
+    if gid != GID:
+        sys.exit("group %s has gid %d, not %d, the one the bits-admin container joins" % (GROUP, gid, GID))
+    return gid
+
+
 def serve(path=SOCKET, gid=GID, helper=None, ready=None):
     helper = helper or Helper()
     if os.path.lexists(path):
@@ -182,7 +195,12 @@ def ask(op, path=SOCKET):
         request["passphrase"] = getpass.getpass("Passphrase: ")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
         c.settimeout(120)
-        c.connect(path)
+        try:
+            c.connect(path)
+        except PermissionError:
+            sys.exit("%s: permission denied (only root and group %d may ask)" % (path, GID))
+        except (FileNotFoundError, ConnectionRefusedError):
+            sys.exit("%s: the helper is not running (systemctl start bits-admin-helper)" % path)
         c.sendall((json.dumps(request) + "\n").encode())
         answer = json.loads(c.makefile().readline())
     print(json.dumps(answer, indent=1))
@@ -191,7 +209,7 @@ def ask(op, path=SOCKET):
 
 def main(argv):
     if argv[:1] == ["serve"]:
-        serve()
+        serve(gid=socket_gid())
     elif len(argv) == 2 and argv[0] == "ask" and argv[1] in OPS:
         return ask(argv[1])
     else:
