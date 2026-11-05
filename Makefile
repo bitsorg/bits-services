@@ -64,9 +64,8 @@ helper-install:  ## As root: the helper's group if missing, its unit for this ch
 admin-install:  ## As root: the bits-admin group and user if missing, /run/bits-admin
 	bash scripts/admin-install.sh
 
-admin-up:  ## Start bits-admin (its socket in /run/bits-admin)
-	@test "$$(stat -c %U:%G /run/bits-admin 2>/dev/null)" = bits-admin:bits-admin || { echo "first: sudo make admin-install"; exit 1; }
-	$(COMPOSE) --profile admin up -d bits-admin
+admin-up:  ## Start bits-admin and wait until it answers on /run/bits-admin/admin.sock
+	@COMPOSE="$(COMPOSE)" bash scripts/admin-up.sh
 
 admin-code:  ## Print bits-admin's setup code (each signs in once; restart it for a new one)
 	@cat /run/bits-admin/setup-code
