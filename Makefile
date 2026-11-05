@@ -6,7 +6,7 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help init config build audit-token up down ps status logs unlock secret credentials-check helper-unit helper-install test clean monitoring monitoring-check
+.PHONY: help init config build audit-token up down ps status logs unlock secret credentials-check helper-unit helper-install admin-install admin-up admin-code test clean monitoring monitoring-check
 
 # The monitoring stack (Phase 4), started on its own by `make monitoring`.
 MON_SERVICES := victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
@@ -60,6 +60,16 @@ helper-unit:  ## Print the bits-admin-helper systemd unit for this checkout
 
 helper-install:  ## As root: the helper's group if missing, its unit for this checkout, started
 	bash scripts/helper-install.sh
+
+admin-install:  ## As root: the bits-admin group and user if missing, /run/bits-admin
+	bash scripts/admin-install.sh
+
+admin-up:  ## Start bits-admin (its socket in /run/bits-admin)
+	@test "$$(stat -c %U:%G /run/bits-admin 2>/dev/null)" = bits-admin:bits-admin || { echo "first: sudo make admin-install"; exit 1; }
+	$(COMPOSE) --profile admin up -d bits-admin
+
+admin-code:  ## Print bits-admin's setup code (each signs in once; restart it for a new one)
+	@cat /run/bits-admin/setup-code
 
 test:  ## Functional wiring check (proxy up, backend https/healthz, backend→proxy)
 	bash scripts/functional-test.sh

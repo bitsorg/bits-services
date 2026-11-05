@@ -15,24 +15,10 @@ UNIT="$UNIT_DIR/bits-admin-helper.service"
 
 [[ "$(id -u)" == 0 ]] || { echo "run as root: sudo make helper-install" >&2; exit 1; }
 
-# ensure_group NAME GID: created when missing; one that exists must have GID.
-ensure_group() {
-  local name="$1" gid="$2" entry
-  if entry="$(getent group "$name")"; then
-    [[ "$(cut -d: -f3 <<<"$entry")" == "$gid" ]] || {
-      echo "group $name exists with gid $(cut -d: -f3 <<<"$entry"), not $gid" >&2; exit 1; }
-    echo "group $name ($gid) is there"
-  elif entry="$(getent group "$gid")"; then
-    echo "gid $gid belongs to group $(cut -d: -f1 <<<"$entry"), not $name" >&2; exit 1
-  else
-    groupadd --system --gid "$gid" "$name"
-    echo "created group $name ($gid)"
-  fi
-}
-
 [[ "$(systemctl is-enabled bits-admin-helper 2>/dev/null || true)" != masked ]] || {
   echo "bits-admin-helper is masked: systemctl unmask it first" >&2; exit 1; }
 [[ -f tools/bits-admin-helper.service ]] || { echo "no tools/bits-admin-helper.service here" >&2; exit 1; }
+source "$DIR/scripts/lib-host.sh"
 ensure_group bits-admin-helper 10004
 if [[ -f "$UNIT" ]]; then
   old="$(sed -n 's/^Description=.* for //p' "$UNIT")"

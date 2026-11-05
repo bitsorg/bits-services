@@ -412,6 +412,38 @@ services:
       retries: 3
       start_period: 60s
 
+  # bits-admin (ADR bits-services 0001): the site's admin page, on a unix socket that
+  # admins reach through an SSH tunnel; no network. Off unless asked: make admin-up
+  # (after sudo make admin-install). It asks the host helper for status and unlock.
+  bits-admin:
+    image: bits-services/bits-console-backend:${BITS_IMAGE_TAG:-local}
+    pull_policy: never          # built by bits-console-backend above
+    profiles:
+      - admin
+    command: ["python3", "-m", "console_backend.admin"]
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    network_mode: none
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Its own user and group, 10003 (sudo make admin-install): /run/bits-admin is its,
+    # the admins (the group) open the socket and read the setup code there.
+    user: "10003:10003"
+    group_add:
+      - "10004"                 # bits-admin-helper: may ask the host helper
+    environment:
+      BITS_ADMIN_SOCKET: /run/bits-admin/admin.sock
+      BITS_ADMIN_CODE_FILE: /run/bits-admin/setup-code
+      BITS_ADMIN_HELPER_SOCKET: /run/bits-admin-helper/helper.sock
+      BITS_ADMIN_ORIGINS: "${BITS_ADMIN_ORIGINS:-http://localhost:8800}"
+    volumes:
+      - /run/bits-admin:/run/bits-admin
+      - /run/bits-admin-helper:/run/bits-admin-helper
+
   # The outside copy of the orchestrator's audit chain (audit-log/): it keeps
   # only events that link onto its chain and cannot change or remove one. For
   # now on this host, in a container and directory of its own that the worker
