@@ -27,13 +27,16 @@ import yaml
 import site_profile as sp
 
 # The console CI/CD variables (ADR bits-services 0001, section E).
-CI_NEEDED = ("PREPUB_URL", "BITS_ORCH_URL", "PREPUB_API_TOKEN", "BITS_STATUS_TOKEN", "BITS_READ_TOKEN")
+CI_NEEDED = ("PREPUB_URL", "PREPUB_API_TOKEN", "BITS_STATUS_TOKEN", "BITS_READ_TOKEN")
 CI_MASKED = ("PREPUB_API_TOKEN", "BITS_STATUS_TOKEN", "BITS_READ_TOKEN", "AWS_ACCESS_KEY_ID",
              "AWS_SECRET_ACCESS_KEY")
 CI_PLAIN = ("PREPUB_URL", "BITS_ORCH_URL", "METRICS_URL", "REMOTE_STORE", "BITS_REPO", "BITS_REF")
 CI_OBSOLETE = ("CERTIFY_MANIFESTS_REMOTE", "BITS_FORGE_TOKEN", "NIGHTLY_FAN_OUT")
 BACKEND_KEYS = ("signing_backend_url", "catalog_backend_url", "ops_backend_url", "session_backend_url")
 KNOWN_SLOTS = ("client-cert",)  # service-secrets.py's own
+# What the backend no longer reads once BITS_CRED_PROXY_AGENT_SOCKET is set (config.py).
+PROXIED = ("BITS_FORGE_OPS_TOKEN", "BITS_FORGE_READ_TOKEN", "BITS_ADMIN_RESOLVE_TOKEN",
+           "BITS_ORCH_S3_ACCESS_KEY_ID", "BITS_ORCH_S3_SECRET_ACCESS_KEY")
 PORTS = {"http": 80, "https": 443}
 
 
@@ -96,8 +99,14 @@ def _ingests(node):
 
 def check_env(r, env):
     profile, secrets = sp.import_env(env)
+    proxied = env.get("BITS_CRED_PROXY_AGENT_SOCKET") and set(PROXIED)
     for key in secrets:
-        r.bad("secret", "%s is in .env: move it to service secrets" % key)
+        if proxied and key in proxied:
+            r.bad("leftover", "%s is in .env, replaced by the credentials proxy: remove it once "
+                              "make credentials-check passes" % key)
+        else:
+            r.bad("secret", "%s is in .env, where the services can read it; no proxy slot "
+                            "replaces it yet" % key)
     diffs, notes = sp.compare(profile, env)
     for line in diffs:  # only the check() errors can remain after an import
         r.bad("differs", line)
@@ -236,17 +245,24 @@ def check_gitlab(r, facts, prepub, fetch):
     keys = {v["key"] for v in variables}
     for key in CI_NEEDED:
         if key not in keys:
-            r.bad("missing", "variable %s: not on the project (a group variable may give it)" % key)
+            r.bad("missing", "variable %s: not on the project (unless a group variable or the "
+                             "runners' config.toml gives it)" % key)
+    if "BITS_ORCH_URL" not in keys:
+        r.note("BITS_ORCH_URL not on the project: unless a group variable or the runners' config.toml "
+               "gives it, jobs send no finished hint (the worker finds them on its next pass)")
     for v in sorted(variables, key=_label):
         key = v["key"]
         if key in CI_OBSOLETE:
             r.bad("obsolete", "variable %s: no longer read once the console CI retires it" % _label(v))
             continue
-        if not v.get("protected"):
-            r.bad("policy", "variable %s is not protected: fork pipelines can read it" % _label(v))
-        if (key in CI_MASKED or sp.is_secret(key, "")) and not v.get("masked"):
-            r.bad("unsafe", "variable %s is a secret but not masked" % _label(v))
-        if key not in CI_PLAIN or v.get("masked"):
+        secret = key in CI_MASKED or sp.is_secret(key, "")
+        if secret:
+            if not v.get("protected"):
+                r.bad("unsafe", "variable %s is a secret, not protected: any branch's pipeline can read it"
+                      % _label(v))
+            if not v.get("masked"):
+                r.bad("unsafe", "variable %s is a secret but not masked" % _label(v))
+        if key not in CI_PLAIN or v.get("masked") or secret:
             continue  # only plain settings are ever shown
         value = str(v.get("value") or "")
         r.note("%s=%s" % (_label(v), _shown(value)))

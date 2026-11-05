@@ -78,7 +78,7 @@ class SiteReportTest(unittest.TestCase):
 
     def test_consistent_site(self):
         r = self.run_report()
-        self.assertEqual(self.problems(r), ["secret    BITS_GITHUB_TOKEN is in .env: move it to service secrets"])
+        self.assertEqual(self.problems(r), ["secret    BITS_GITHUB_TOKEN is in .env, where the services can read it; no proxy slot replaces it yet"])
         self.assertNotIn("ghp_secret_value", "\n".join(r.lines))
         self.assertIn("ok        slots asked for: gitlab-read, s3-access-b, s3-secret-b", r.lines)
 
@@ -93,6 +93,19 @@ class SiteReportTest(unittest.TestCase):
         self.assertIn("differs   prepub http://bits-build-01.cern.ch:8080: in config/console.yaml, "
                       "not scraped (scrape.yml)", problems)
 
+    def test_leftovers_with_the_credentials_proxy(self):
+        write(os.path.join(self.services, ".env"), ENV + "BITS_FORGE_OPS_TOKEN='glpat-x'\n")
+        self.assertIn("secret    BITS_FORGE_OPS_TOKEN is in .env, where the services can read it; no proxy slot replaces it yet",
+                      self.problems(self.run_report()))
+        write(os.path.join(self.services, ".env"), ENV + "BITS_FORGE_OPS_TOKEN='glpat-x'\n"
+              "BITS_ORCH_S3_ACCESS_KEY_ID='AKIA'\nBITS_ORCH_S3_SECRET_ACCESS_KEY='s3s'\n"
+              "BITS_CRED_PROXY_AGENT_SOCKET='/run/credentials-proxy/agent.sock'\n")
+        problems = self.problems(self.run_report())
+        for key in ("BITS_FORGE_OPS_TOKEN", "BITS_ORCH_S3_ACCESS_KEY_ID", "BITS_ORCH_S3_SECRET_ACCESS_KEY"):
+            self.assertIn("leftover  %s is in .env, replaced by the credentials proxy: remove it once "
+                          "make credentials-check passes" % key, problems)
+        self.assertIn("secret    BITS_GITHUB_TOKEN is in .env, where the services can read it; no proxy slot replaces it yet", problems)
+
     def test_slots(self):
         problems = self.problems(self.run_report(slots=["gitlab-read", "s3-access-b", "client-cert", "old"]))
         self.assertIn("missing   slot s3-secret-b: a proxy asks for it, none is stored", problems)
@@ -104,14 +117,17 @@ class SiteReportTest(unittest.TestCase):
             {"key": "PREPUB_API_TOKEN", "value": "tok-secret-1", "protected": True, "masked": True},
             {"key": "BITS_STATUS_TOKEN", "value": "tok-secret-2", "protected": False, "masked": False},
             {"key": "CERTIFY_MANIFESTS_REMOTE", "value": "x", "protected": True, "masked": False},
+            {"key": "METRICS_URL", "value": "http://m:8428", "protected": False, "masked": False},
             {"key": "PREPUB_API_TOKEN", "value": "tok-secret-3", "protected": True, "masked": False,
              "environment_scope": "staging"},
         ]
         schedules = [{"id": 7, "description": "nightly", "active": True}]
         r = self.run_report(gitlab={"variables": variables, "pipeline_schedules": schedules})
         problems, text = self.problems(r), "\n".join(r.lines)
-        for line in ("missing   variable BITS_READ_TOKEN: not on the project (a group variable may give it)",
-                     "policy    variable BITS_STATUS_TOKEN is not protected: fork pipelines can read it",
+        for line in ("missing   variable BITS_READ_TOKEN: not on the project (unless a group variable or "
+                     "the runners' config.toml gives it)",
+                     "unsafe    variable BITS_STATUS_TOKEN is a secret, not protected: any branch's pipeline "
+                     "can read it",
                      "unsafe    variable BITS_STATUS_TOKEN is a secret but not masked",
                      "obsolete  variable CERTIFY_MANIFESTS_REMOTE: no longer read once the console CI retires it",
                      "differs   PREPUB_URL http://elsewhere:8080 is not one of the console's prepub services",
@@ -119,7 +135,14 @@ class SiteReportTest(unittest.TestCase):
                      "obsolete  schedule 7 (nightly): the orchestrator runs the nightlies"):
             self.assertIn(line, problems)
         self.assertFalse([p for p in problems if "BITS_ORCH_URL" in p])  # a trailing slash is the same
+        self.assertFalse([p for p in problems if "CERTIFY" not in p and "not protected" in p
+                          and "TOKEN" not in p])  # plain settings need not be protected
         self.assertNotIn("tok-secret", text)
+        self.assertFalse([p for p in problems if "BITS_ORCH_URL" in p])
+        r = self.run_report(gitlab={"variables": variables[2:], "pipeline_schedules": []})
+        self.assertTrue([n for n in r.lines if n.startswith("note      BITS_ORCH_URL not on the project")])
+        self.assertFalse(set(rep.CI_PLAIN) & set(rep.CI_MASKED))
+        self.assertFalse([k for k in rep.CI_PLAIN if rep.sp.is_secret(k, "")])
 
     def test_command_line(self):
         tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "site_report.py")
