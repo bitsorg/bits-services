@@ -2,6 +2,8 @@
 # Runtime secrets and local state — never commit.
 .env
 *.env
+.env.bak-*
+.env.new-*
 !.env.example
 
 # Key material must NEVER be committed. The signing key lives only in the
