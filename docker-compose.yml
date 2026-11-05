@@ -25,7 +25,7 @@ services:
       # + BuildKit allow.
       context: ali-bot/security-proxy
       dockerfile: ../../security-proxy/Dockerfile
-    image: bits-services/security-proxy:local
+    image: bits-services/security-proxy:${BITS_IMAGE_TAG:-local}
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -69,7 +69,7 @@ services:
   # signer: it needs egress, and the signer keeps none (signer-net is internal).
   # Config: security-proxy/credentials.sample.json; secrets: tools/service-secrets.py.
   credentials-proxy:
-    image: bits-services/security-proxy:local
+    image: bits-services/security-proxy:${BITS_IMAGE_TAG:-local}
     pull_policy: never          # built by security-proxy above
     # Off until it is set up (config dir, secrets): COMPOSE_PROFILES=credentials
     # in .env starts it with the rest. No depends_on the signer, so starting this
@@ -109,7 +109,7 @@ services:
   # internet, cannot reach it. Config: security-proxy/store-writer.sample.json;
   # its slots (s3-access-<bucket>, s3-secret-<bucket>) are pushed by make unlock.
   store-writer:
-    image: bits-services/security-proxy:local
+    image: bits-services/security-proxy:${BITS_IMAGE_TAG:-local}
     pull_policy: never          # built by security-proxy above
     profiles:
       - store
@@ -161,7 +161,7 @@ services:
         USER nobody
         EXPOSE 8443
         CMD ["uvicorn","console_backend.main:app","--host","0.0.0.0","--port","8443","--ssl-keyfile","/certs/key.pem","--ssl-certfile","/certs/cert.pem"]
-    image: bits-services/bits-console-backend:local
+    image: bits-services/bits-console-backend:${BITS_IMAGE_TAG:-local}
     restart: unless-stopped
     tmpfs:
       - /tmp
@@ -286,7 +286,7 @@ services:
   # (/orch, shared with the backend) and runs actions with the forge token. No
   # published port; on signer-net since it certifies builds (M8a).
   bits-orchestrator:
-    image: bits-services/bits-console-backend:local
+    image: bits-services/bits-console-backend:${BITS_IMAGE_TAG:-local}
     pull_policy: never          # built by bits-console-backend above
     depends_on:
       - bits-console-backend
@@ -419,7 +419,7 @@ services:
   # events.jsonl there). `make audit-token` creates the shared token.
   audit-log:
     build: ./audit-log
-    image: bits-services/audit-log:local
+    image: bits-services/audit-log:${BITS_IMAGE_TAG:-local}
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -447,7 +447,7 @@ services:
   # the worker alone. No secret; its only way out is grype's database download.
   sbom-scanner:
     build: ./sbom-scanner
-    image: bits-services/sbom-scanner:local
+    image: bits-services/sbom-scanner:${BITS_IMAGE_TAG:-local}
     profiles:
       - scanner
     restart: unless-stopped
