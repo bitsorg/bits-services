@@ -7,15 +7,19 @@ compose, which bits-admin may not. It listens on a unix socket that only the
 bits-admin container's group can open; one JSON request per connection:
 
     {"op": "status"}
+    {"op": "check-signer-passphrase", "passphrase": "..."}
     {"op": "unlock-signer", "passphrase": "..."}
     {"op": "push-secrets", "passphrase": "..."}
 
-It does what `make unlock` does (tools/unlocking.py), refuses an unlock while the
+check-signer-passphrase decrypts the signing key and forgets it, so bits-admin can
+check a passphrase before storing it (also while a key is loaded; the lockout below
+applies). The others do what `make unlock` does (tools/unlocking.py). The helper
+refuses an unlock while the
 signer holds a key, stops after repeated wrong passphrases, and logs who asked
 and the outcome, never a passphrase. By hand, as root:
 
     tools/bits-admin-helper.py serve
-    tools/bits-admin-helper.py ask status|unlock-signer|push-secrets
+    tools/bits-admin-helper.py ask status|check-signer-passphrase|unlock-signer|push-secrets
 """
 
 import collections
@@ -37,7 +41,7 @@ GID = int(os.environ.get("BITS_ADMIN_HELPER_GID", "10004"))  # the one bits-admi
 MAX_REQUEST = 4096
 TIMEOUT = 15
 FAILURES, WINDOW = 5, 600  # wrong passphrases allowed per window (seconds)
-OPS = ("status", "unlock-signer", "push-secrets")
+OPS = ("status", "check-signer-passphrase", "unlock-signer", "push-secrets")
 
 
 def log(text):
@@ -74,6 +78,7 @@ class Helper:
 
     def __init__(self, ops=None, now=time.monotonic):
         self.ops = ops or {"health": compose_health, "signer": signer_state,
+                           "check": lambda pw: unlocking.decrypt_signing_seed(unlocking.SIGN_KEY, pw),
                            "unlock": unlocking.unlock_signer,
                            "load": unlocking.load_service_secrets,
                            "push": unlocking.push_service_secrets}
@@ -89,7 +94,7 @@ class Helper:
         if op == "status":
             state, keyid = self.ops["signer"]()
             return {"ok": True, "signer": state, "key_id16": keyid[:16], "services": self.ops["health"]()}
-        if op not in ("unlock-signer", "push-secrets"):
+        if op not in OPS:
             return {"ok": False, "error": "unknown request"}
         passphrase = request.get("passphrase")
         if not isinstance(passphrase, str) or not passphrase:
@@ -99,6 +104,9 @@ class Helper:
         if op == "unlock-signer" and self.ops["signer"]()[0] == "loaded":
             return {"ok": False, "error": "the signer already holds a key"}
         try:
+            if op == "check-signer-passphrase":
+                self.ops["check"](passphrase.encode())  # the decrypted seed is dropped
+                return {"ok": True}
             if op == "unlock-signer":
                 _, keyid = self.ops["unlock"](passphrase.encode())
                 return {"ok": True, "key_id16": keyid[:16]}

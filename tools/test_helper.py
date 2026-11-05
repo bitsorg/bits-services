@@ -36,7 +36,12 @@ class Fakes:
             if pw != b"right-pass-9":
                 raise helper.unlocking.WrongPassphrase("wrong passphrase, or secrets/service-secrets.enc is damaged")
             return {"gitlab-read": "glpat-x"}
-        return {"health": lambda: {"security-proxy": "healthy"},
+        def check(pw):
+            self.calls.append(("check", pw))
+            if pw != b"right-pass-9":
+                raise helper.unlocking.WrongPassphrase("wrong passphrase, or not an encrypted Ed25519 key")
+            return "c2VlZA=="
+        return {"health": lambda: {"security-proxy": "healthy"}, "check": check,
                 "signer": lambda: (self.state, "43fd71705f29a075ffff" if self.state == "loaded" else ""),
                 "unlock": unlock, "load": load,
                 "push": lambda secrets: {"credentials-proxy": sorted(secrets)}}
@@ -55,6 +60,37 @@ class HelperTest(unittest.TestCase):
                          {"ok": False, "error": "the signer already holds a key"})
         self.assertEqual(self.h.handle({"op": "push-secrets", "passphrase": "right-pass-9"}),
                          {"ok": True, "pushed": {"credentials-proxy": ["gitlab-read"]}})
+
+    def test_check_the_passphrase(self):
+        check = lambda pw: self.h.handle({"op": "check-signer-passphrase", "passphrase": pw})
+        self.assertEqual(check("right-pass-9"), {"ok": True})
+        self.assertEqual(check("wrong-pass-7")["ok"], False)
+        self.fakes.state = "loaded"  # allowed while loaded: the proxy is not touched
+        self.assertEqual(check("right-pass-9"), {"ok": True})
+        self.assertEqual([c[0] for c in self.fakes.calls], ["check"] * 3)
+        for _ in range(helper.FAILURES - 1):  # wrong ones count towards the lockout
+            check("wrong-pass-7")
+        tried = len(self.fakes.calls)
+        self.assertIn("too many wrong passphrases", check("right-pass-9")["error"])
+        self.assertEqual(len(self.fakes.calls), tried)  # refused before decrypting
+
+    def test_check_decrypts_the_real_key_file(self):
+        from cryptography.hazmat.primitives import serialization as s
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        pem = Ed25519PrivateKey.generate().private_bytes(
+            s.Encoding.PEM, s.PrivateFormat.PKCS8, s.BestAvailableEncryption(b"right-pass-9"))
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "bits-sign-key.enc.pem")
+            with open(path, "wb") as f:
+                f.write(pem)
+            old, helper.unlocking.SIGN_KEY = helper.unlocking.SIGN_KEY, path
+            try:
+                real = helper.Helper()
+                check = lambda pw: real.handle({"op": "check-signer-passphrase", "passphrase": pw})
+                self.assertEqual(check("right-pass-9"), {"ok": True})
+                self.assertIn("wrong passphrase", check("wrong-pass-7")["error"])
+            finally:
+                helper.unlocking.SIGN_KEY = old
 
     def test_wrong_passphrases_lock_out(self):
         for _ in range(helper.FAILURES):

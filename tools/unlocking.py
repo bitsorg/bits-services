@@ -23,6 +23,7 @@ AGENT = "/run/security-proxy/agent.sock"
 SIGNER = os.environ.get("SECURITY_PROXY_SERVICE", "security-proxy")
 SIGN_SLOT = os.environ.get("SIGN_KEY_SLOT", "bits-sign-key")
 SIGN_ROUTE = os.environ.get("SIGN_ROUTE_SERVICE", "bits-manifest-sign")
+SIGN_KEY = os.path.join(DIR, "secrets", "bits-sign-key.enc.pem")
 SECRETS_FILE = os.environ.get("SERVICE_SECRETS", os.path.join(DIR, "secrets", "service-secrets.enc"))
 CRED_PROXY = os.environ.get("CREDENTIALS_PROXY_SERVICE", "credentials-proxy")
 # The store writer (M8a): the store's keypair goes there, out of the backend's reach.
@@ -96,7 +97,7 @@ def signing_key_id(service=SIGNER, route=SIGN_ROUTE):
     return keyid.strip()
 
 
-def unlock_signer(passphrase, enc_path=os.path.join(DIR, "secrets", "bits-sign-key.enc.pem")):
+def unlock_signer(passphrase, enc_path=SIGN_KEY):
     """Decrypts and pushes the signing key; returns (what the proxy said, key id)."""
     said = push(SIGN_SLOT, decrypt_signing_seed(enc_path, passphrase), SIGNER)
     return said, signing_key_id()
