@@ -32,11 +32,8 @@ class FakeCompose:
         if "push" in args:
             return 0, ("tls: ready\n" if args[args.index("push") + 1] == ul.CERT_SLOT
                        else "pushed slot '%s'\n" % args[args.index("push") + 1]), ""
-        if "--addr" in args:
-            return 0, "http://127.0.0.1:9000\n", ""
-        if "security-proxy-token" in args:
-            return 0, "gate-token\n", ""
         if "python3" in args:
+            assert "security-proxy-token" in value and "gate-token" not in " ".join(args)
             return 0, "43fd71705f29a075ffff\n", ""
         return 1, "", "unexpected"
 

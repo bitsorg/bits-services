@@ -28,9 +28,12 @@ CRED_PROXY = os.environ.get("CREDENTIALS_PROXY_SERVICE", "credentials-proxy")
 # The store writer (M8a): the store's keypair goes there, out of the backend's reach.
 WRITER = os.environ.get("STORE_WRITER_SERVICE", "store-writer")
 CERT_SLOT = "client-cert"
+# Run inside the signer's container: the gate token never leaves it (no argv on the host).
 PUBKEY = r'''
-import sys, json, urllib.request
-addr, token = sys.argv[1], sys.argv[2]
+import sys, json, subprocess, urllib.request
+route, agent = sys.argv[1], sys.argv[2]
+token = subprocess.check_output(["security-proxy-token", route, "--socket", agent], text=True).strip()
+addr = subprocess.check_output(["security-proxy-token", "--addr", "--socket", agent], text=True).strip()
 req = urllib.request.Request(addr + "/sign/bits/pubkey", headers={"Authorization": "Bearer " + token})
 print(json.load(urllib.request.urlopen(req))["keyid"])
 '''
@@ -73,13 +76,9 @@ def push(slot, value, service):
 
 def signing_key_id(service=SIGNER, route=SIGN_ROUTE):
     """The full key id the signer has loaded, read through its sign route."""
-    code, token, err = _compose(["exec", "-T", service, "security-proxy-token", route, "--socket", AGENT])
-    code2, addr, err2 = _compose(["exec", "-T", service, "security-proxy-token", "--addr", "--socket", AGENT])
-    if code or code2:
-        raise UnlockError("no gate token from %s: %s" % (service, (err if code else err2).strip()[:300]))
-    code, keyid, err = _compose(["exec", "-T", service, "python3", "-", addr.strip(), token.strip()], PUBKEY)
+    code, keyid, err = _compose(["exec", "-T", service, "python3", "-", route, AGENT], PUBKEY)
     if code:
-        raise UnlockError("the sign route did not answer: %s" % err.strip()[:300])
+        raise UnlockError("the sign route did not answer: %s" % err.strip()[-300:])
     return keyid.strip()
 
 
