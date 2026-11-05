@@ -49,8 +49,13 @@ echo "  (admin policy uses your GITLAB username — may differ from your login '
 _ask BITS_ADMINS_POLICY      "Admin policy: * @<gitlab-username>"  "* @${_gituser}"
 _ask SECURITY_PROXY_CONFIG_DIR "Security-proxy config dir"        "$DIR/config/security-proxy"
 _ask TLS_CERT_DIR            "Backend TLS cert dir"               "$DIR/secrets/tls"
-_ask BITS_SRC                "Local bits checkout"                "../bits"
+_ask BITS_SRC                "Local bits checkout"                "./bits"
 _ask MONITORING_DATA_DIR     "Monitoring data dir"                "$DIR/data/monitoring"
+# The images are built from the submodules; a fresh clone or worktree has them empty.
+_empty=""
+if [[ "$BITS_SRC" == "./bits" && ! -f bits/console-backend/pyproject.toml ]]; then _empty="bits "; fi
+if [[ ! -d ali-bot/security-proxy ]]; then _empty+="ali-bot"; fi
+if [[ -n "$_empty" ]]; then warn "empty submodule(s), run: git submodule update --init ${_empty% }"; fi
 # World-writable as in the testbed: the VictoriaMetrics images need not run as you.
 install -d -m 777 "$MONITORING_DATA_DIR/vm" "$MONITORING_DATA_DIR/vmagent"
 

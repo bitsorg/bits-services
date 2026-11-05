@@ -123,6 +123,12 @@ class SetupShTest(unittest.TestCase):
         with open(os.path.join(tree, ".env")) as f:
             return f.read()
 
+    def test_empty_submodules_are_named(self):
+        with tempfile.TemporaryDirectory() as tree:
+            self.run_setup(tree)
+            r = self.run_setup(tree, check=False)
+            self.assertIn("git submodule update --init bits ali-bot", r.stdout + r.stderr)
+
     def test_fresh_then_again(self):
         with tempfile.TemporaryDirectory() as tree:
             first = sp.parse_env(self.run_setup(tree))

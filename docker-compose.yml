@@ -146,9 +146,9 @@ services:
   # local `bits` checkout (console-backend/ + bits_helpers/).
   bits-console-backend:
     build:
-      # Built from your LOCAL bits checkout (BITS_SRC, default ../bits) — a
-      # submodule can't be used here (the console-backend code is local/unpushed).
-      context: ${BITS_SRC:-../bits}
+      # Built from BITS_SRC: the ./bits submodule by default (the commit bits-services
+      # records), or your own bits checkout for console-backend code not pushed yet.
+      context: ${BITS_SRC:-./bits}
       dockerfile_inline: |
         FROM python:3.12-slim
         WORKDIR /app
