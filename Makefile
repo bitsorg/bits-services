@@ -6,7 +6,7 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help init config build audit-token up down ps status logs unlock secret credentials-check helper-unit test clean monitoring monitoring-check
+.PHONY: help init config build audit-token up down ps status logs unlock secret credentials-check helper-unit helper-install test clean monitoring monitoring-check
 
 # The monitoring stack (Phase 4), started on its own by `make monitoring`.
 MON_SERVICES := victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
@@ -57,6 +57,9 @@ credentials-check:  ## GitLab and the store through the credentials proxy, from 
 
 helper-unit:  ## Print the bits-admin-helper systemd unit for this checkout
 	@sed "s|@DIR@|$(CURDIR)|g" tools/bits-admin-helper.service
+
+helper-install:  ## As root: the helper's group if missing, its unit for this checkout, started
+	bash scripts/helper-install.sh
 
 test:  ## Functional wiring check (proxy up, backend https/healthz, backend→proxy)
 	bash scripts/functional-test.sh
