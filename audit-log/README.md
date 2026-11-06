@@ -68,6 +68,13 @@ rewrite); `outside clear --by <user>` then lets the worker send again.
 
 `AUDIT_READ_TOKEN` (optional) is a token that can read but not write.
 
+Further chains, such as bits-admin's, are kept the same way in a file of their own,
+`chain-<name>.jsonl`, under `/v1/chains/<name>/events` and `/v1/chains/<name>/head`. Name
+them in `AUDIT_CHAINS` (comma-separated); each is written only with its own token,
+read from `AUDIT_CHAIN_TOKENS/<name>/token` (default `/run/audit-chains`). A chain
+whose token is missing is left out, with a warning. The routes above are the
+orchestrator's chain, and the read token reads them all.
+
 Standard library only; `make test` runs the tests. The hash function must stay
 the orchestrator's (`console_backend/orch/events.py`): both test suites check
 the same test vector. Publishing the daily head to a transparency log (Rekor)

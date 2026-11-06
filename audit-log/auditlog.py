@@ -20,6 +20,11 @@ pass, and `python -m console_backend.orch.outside verify` compares them all.
     GET  /healthz     ok, no token
     GET  /metrics     Prometheus text, no token
 
+Further chains (AUDIT_CHAINS, e.g. bits-admin) are kept the same way, each in its
+own file chain-<name>.jsonl and written only with its own token:
+/v1/chains/<name>/events and /v1/chains/<name>/head. The routes above are the
+orchestrator's chain, also /v1/chains/orchestrator/...; the read token reads all.
+
 A row is the orchestrator's events row: seq, ts_ms, kind, subject, actor_kind,
 actor_id, cause, payload (the canonical JSON text), prev_hash, hash. The hash
 function is the orchestrator's (console_backend/orch/events.py `_digest`); the
@@ -33,6 +38,9 @@ Python standard library only. Configuration from the environment:
     AUDIT_READ_TOKEN   optional read-only token (or AUDIT_READ_TOKEN_FILE)
     AUDIT_LISTEN       host:port (default 0.0.0.0:8443)
     AUDIT_TLS_CERT, AUDIT_TLS_KEY   serve HTTPS when both are set
+    AUDIT_CHAINS       further chains, comma-separated; the write token of each in
+                       AUDIT_CHAIN_TOKENS/<name>/token (default /run/audit-chains);
+                       a chain without its token is left out, with a warning
 """
 
 import hashlib
@@ -40,6 +48,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import ssl
 import sys
 import threading
@@ -50,6 +59,7 @@ GENESIS = "0" * 64
 MAX_BODY = 8 << 20
 MAX_BATCH = 1000
 MAX_PAYLOAD = 64 * 1024
+CHAIN = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 FIELDS = ("seq", "ts_ms", "kind", "subject", "actor_kind", "actor_id", "cause",
           "payload", "prev_hash", "hash")
 
@@ -90,9 +100,9 @@ def check_row(row):
 class Log:
     """The append-only file and an index of its rows."""
 
-    def __init__(self, directory):
+    def __init__(self, directory, filename="events.jsonl"):
         os.makedirs(directory, exist_ok=True)
-        self.path = os.path.join(directory, "events.jsonl")
+        self.path = os.path.join(directory, filename)
         self.lock = threading.Lock()
         self.offsets = []          # offsets[seq - 1] = byte offset of that row
         self.head = (0, GENESIS)
@@ -202,6 +212,7 @@ class Handler(BaseHTTPRequestHandler):
     log_obj = None
     write_token = ""
     read_token = ""
+    chains = {}             # name -> (Log, its write token); "orchestrator" is log_obj
 
     def log_message(self, fmt, *args):
         log.info("%s %s", self.address_string(), fmt % args)
@@ -215,14 +226,24 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _token_ok(self, write):
+    def _route(self, path):
+        """(Log, its write token, what) for a path, or None."""
+        parts = path.split("/")[1:]
+        if parts[:1] == ["v1"] and len(parts) == 2:
+            parts = ["v1", "chains", "orchestrator", parts[1]]
+        if len(parts) == 4 and parts[:2] == ["v1", "chains"] and parts[2] in self.chains:
+            lg, token = self.chains[parts[2]]
+            return lg, token, parts[3]
+        return None
+
+    def _token_ok(self, write, token):
         got = self.headers.get("Authorization", "")
         got = got[7:] if got.startswith("Bearer ") else ""
-        ok = [self.write_token] + ([] if write else [self.read_token])
+        ok = [token] + ([] if write else [self.read_token])
         return any(t and hmac.compare_digest(got.encode(), t.encode()) for t in ok)
 
-    def _head(self):
-        seq, h = self.log_obj.head
+    def _head(self, lg):
+        seq, h = lg.head
         return {"seq": seq, "hash": h, "count": seq}
 
     def do_GET(self):
@@ -235,25 +256,34 @@ class Handler(BaseHTTPRequestHandler):
                     "# TYPE audit_log_received_total counter\naudit_log_received_total %d\n"
                     "# TYPE audit_log_refused_total counter\naudit_log_refused_total %d\n"
                     % (lg.head[0], lg.received, lg.refused))
+            for name, (other, _) in sorted(self.chains.items()):
+                if other is not lg:
+                    text += ('audit_log_chain_head_seq{chain="%s"} %d\naudit_log_chain_refused_total'
+                             '{chain="%s"} %d\n' % (name, other.head[0], name, other.refused))
             return self._send(200, text.encode(), "text/plain; version=0.0.4")
-        if not self._token_ok(write=False):
+        route = self._route(url.path) or (None, self.write_token, "")
+        lg, token, what = route
+        if not self._token_ok(False, token):  # before the 404, as it always was
             return self._send(401, {"error": "a bearer token is required"})
-        if url.path == "/v1/head":
-            return self._send(200, self._head())
-        if url.path == "/v1/events":
+        if what not in ("head", "events"):
+            return self._send(404, {"error": "not found"})
+        if what == "head":
+            return self._send(200, self._head(lg))
+        if what == "events":
             q = parse_qs(url.query)
             try:
                 after = int((q.get("after") or ["0"])[0])
                 limit = max(1, min(int((q.get("limit") or ["1000"])[0]), 1000))
             except ValueError:
                 return self._send(400, {"error": "after and limit are integers"})
-            return self._send(200, {"events": self.log_obj.after(after, limit)})
-        return self._send(404, {"error": "not found"})
+            return self._send(200, {"events": lg.after(after, limit)})
 
     def do_POST(self):
-        if urlparse(self.path).path != "/v1/events":
+        route = self._route(urlparse(self.path).path)
+        if route is None or route[2] != "events":
             return self._send(404, {"error": "not found"})
-        if not self._token_ok(write=True):
+        lg, token, _ = route
+        if not self._token_ok(True, token):
             return self._send(401, {"error": "the write token is required"})
         try:
             n = int(self.headers.get("Content-Length") or "0")
@@ -264,23 +294,34 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = json.loads(self.rfile.read(n) or b"{}")
             rows = body.get("events") if isinstance(body, dict) else None
-            added = self.log_obj.append(rows)
+            added = lg.append(rows)
         except (ValueError, Refused) as e:
-            self.log_obj.refused += 1
-            log.error("refused a batch from %s: %s", self.address_string(), e)
-            return self._send(409, {"error": str(e), "head": self._head()})
+            lg.refused += 1
+            log.error("refused a batch from %s: %s%s", self.address_string(), e,
+                      "" if lg is self.log_obj else " (%s)" % lg.path)
+            return self._send(409, {"error": str(e), "head": self._head(lg)})
         except OSError as e:
-            log.error("cannot write %s: %s", self.log_obj.path, e)
+            log.error("cannot write %s: %s", lg.path, e)
             return self._send(503, {"error": "the log cannot be written now"})
-        return self._send(200, {"accepted": added, "head": self._head()})
+        return self._send(200, {"accepted": added, "head": self._head(lg)})
 
 
-def make_server(directory, listen, write_token, read_token="", cert=None, key=None):
+def make_server(directory, listen, write_token, read_token="", cert=None, key=None, chains=None):
+    """*chains*: {name: write token} of the further chains."""
     if not write_token:
         raise SystemExit("set AUDIT_TOKEN (or AUDIT_TOKEN_FILE)")
+    chains = chains or {}
+    tokens = [write_token, read_token] + list(chains.values())
+    for name, token in chains.items():
+        if not CHAIN.match(name) or name == "orchestrator" or not token or tokens.count(token) > 1:
+            raise SystemExit("chain %r: a name like bits-admin, and a token of its own" % name)
+    main_log = Log(directory)
+    all_chains = {"orchestrator": (main_log, write_token)}
+    for name, token in chains.items():
+        all_chains[name] = (Log(directory, "chain-%s.jsonl" % name), token)
     host, _, port = listen.rpartition(":")
-    handler = type("H", (Handler,), {"log_obj": Log(directory), "write_token": write_token,
-                                      "read_token": read_token})
+    handler = type("H", (Handler,), {"log_obj": main_log, "write_token": write_token,
+                                      "read_token": read_token, "chains": all_chains})
     ctx = None
     if cert and key:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -314,13 +355,35 @@ class Server(ThreadingHTTPServer):
         super().finish_request(request, client_address)
 
 
+def chain_tokens(names, directory):
+    """{name: token} of the chains named whose token file is there."""
+    out = {}
+    for name in [n.strip() for n in (names or "").split(",") if n.strip()]:
+        if not CHAIN.match(name) or name == "orchestrator":
+            raise SystemExit("AUDIT_CHAINS: %r is not a chain name like bits-admin" % name)
+        try:
+            with open(os.path.join(directory, name, "token")) as fh:
+                token = fh.read().strip()
+        except OSError as e:
+            token, why = "", e
+        else:
+            why = "the token file is empty"
+        if token:
+            out[name] = token
+        else:
+            log.warning("chain %s left out: no token (%s)", name, why)
+    return out
+
+
 def main():
     logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
     srv = make_server(os.environ.get("AUDIT_DATA", "/data"),
                       os.environ.get("AUDIT_LISTEN", "0.0.0.0:8443"),
                       _secret("AUDIT_TOKEN"), _secret("AUDIT_READ_TOKEN"),
-                      os.environ.get("AUDIT_TLS_CERT"), os.environ.get("AUDIT_TLS_KEY"))
+                      os.environ.get("AUDIT_TLS_CERT"), os.environ.get("AUDIT_TLS_KEY"),
+                      chain_tokens(os.environ.get("AUDIT_CHAINS"),
+                                   os.environ.get("AUDIT_CHAIN_TOKENS", "/run/audit-chains")))
     log.info("audit-log listening on %s:%s", *srv.server_address[:2])
     srv.serve_forever()
 

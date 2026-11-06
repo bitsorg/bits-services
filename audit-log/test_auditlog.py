@@ -146,6 +146,56 @@ class TestHTTP(unittest.TestCase):
         self.assertEqual(self.call("GET", "/v1/head", "nope")[0], 401)
 
 
+class TestChains(TestHTTP):
+    def setUp(self):
+        self.data = tempfile.mkdtemp()
+        self.srv = auditlog.make_server(self.data, "127.0.0.1:0", "w-token", "r-token",
+                                        chains={"bits-admin": "a-token"})
+        self.url = "http://127.0.0.1:%d" % self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def test_each_chain_has_its_file_and_its_token(self):
+        rows, theirs = chain(2), chain(3)
+        path = "/v1/chains/bits-admin/events"
+        self.assertEqual(self.call("POST", path, "w-token", {"events": rows})[0], 401)
+        self.assertEqual(self.call("POST", "/v1/events", "a-token", {"events": rows})[0], 401)
+        self.assertEqual(self.call("POST", path, "a-token", {"events": rows})[1]["accepted"], 2)
+        self.assertEqual(self.call("POST", "/v1/chains/orchestrator/events", "w-token",
+                                   {"events": theirs})[1]["accepted"], 3)
+        self.assertEqual(self.call("GET", "/v1/chains/bits-admin/head", "r-token")[1]["seq"], 2)
+        self.assertEqual(self.call("GET", "/v1/head", "r-token")[1]["seq"], 3)
+        self.assertEqual(self.call("GET", "/v1/chains/bits-admin/events?after=1", "a-token")[1]["events"],
+                         rows[1:])
+        self.assertEqual(self.call("GET", "/v1/chains/bits-admin/head", "w-token")[0], 401)
+        self.assertEqual(self.call("GET", "/v1/chains/nope/head", "r-token")[0], 404)
+        self.assertEqual(self.call("GET", "/v1/head", "a-token")[0], 401)
+        self.assertEqual(self.call("POST", path, "a-token", {"events": [dict(rows[0], kind="x")]})[0], 409)
+        self.assertEqual(self.srv.RequestHandlerClass.log_obj.refused, 0)  # the orchestrator's count
+        self.assertEqual(sorted(os.listdir(self.data)), ["chain-bits-admin.jsonl", "events.jsonl"])
+        self.assertEqual(auditlog.Log(self.data, "chain-bits-admin.jsonl").head[0], 2)  # after a restart
+        self.assertEqual(self.call("GET", "/v1/nope", "")[0], 401)   # a token first, as before
+        self.assertEqual(self.call("GET", "/v1/head/", "r-token")[0], 404)
+        with urllib.request.urlopen(self.url + "/metrics", timeout=5) as r:
+            self.assertIn('audit_log_chain_head_seq{chain="bits-admin"} 2', r.read().decode())
+
+    def test_names_and_tokens_are_checked(self):
+        for chains in ({"Bad/Name": "t"}, {"orchestrator": "t"}, {"bits-admin": "w"}, {"bits-admin": ""},
+                       {"bits-admin": "r"}, {"a": "t", "b": "t"}):
+            with self.assertRaises(SystemExit, msg=chains):
+                auditlog.make_server(tempfile.mkdtemp(), "127.0.0.1:0", "w", "r", chains=chains)
+        with self.assertRaises(SystemExit):
+            auditlog.chain_tokens("Bits-Admin", tempfile.mkdtemp())
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "bits-admin"))
+        os.makedirs(os.path.join(d, "empty"))
+        with open(os.path.join(d, "bits-admin", "token"), "w") as fh:
+            fh.write("a-token\n")
+        open(os.path.join(d, "empty", "token"), "w").close()
+        with self.assertLogs("audit-log", "WARNING") as said:
+            self.assertEqual(auditlog.chain_tokens("bits-admin, missing,empty", d), {"bits-admin": "a-token"})
+        self.assertEqual(len(said.output), 2)
+
+
 @unittest.skipUnless(shutil.which("openssl"), "needs openssl to make a certificate")
 class TestTLS(unittest.TestCase):
     def test_a_silent_client_does_not_block_the_others(self):
