@@ -126,12 +126,16 @@ class SiteHostsTest(unittest.TestCase):
         hosts, _ = self.collect()
         hosts["links"].append({"service": "x", "key": "BITS_OIDC_ISSUER", "scheme": "https",
                                "host": "gitlab.cern.ch", "port": 443})
+        hosts["links"].append({"service": "bits-admin", "key": "BITS_ADMIN_ORIGINS", "scheme": "http",
+                               "host": "bits-admin.localhost", "port": 8800})  # the laptop's end of the tunnel
+        hosts["scrape"].append({"job": "prepub", "host": "only-scraped.example", "port": 8080, "labels": {}})
         got = [(t, w) for t, w, _ in site_hosts.probes(hosts)]
         self.assertEqual(got, [
             ("127.0.0.1:8443", "GET /healthz"),
             ("cvmfs-bits-01.cern.ch:8080", "GET /api/v1/health"),   # a prepub node
             ("bits-build-01.cern.ch:8080", "GET /api/v1/health"),
             ("gitlab.cern.ch:443", "TCP connect"),                   # the first link to it decides
+            ("only-scraped.example:8080", "GET /api/v1/health"),     # its monitoring job says prepub
         ])                                  # audit-log, node-exporter: services here, not probed
 
     def test_check_says_only_the_outcome(self):

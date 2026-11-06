@@ -157,9 +157,10 @@ def probes(hosts):
                 out.append(("127.0.0.1:%s" % p["published"], "GET /healthz", lambda u=url: _http(u, verify=False)))
     here = set(LOCAL_NAMES) | {str(hosts.get("host", "")).lower()} | set(hosts.get("services") or {})
     ends = [(l["host"], l["port"], l.get("scheme", "https"), l.get("key", "")) for l in hosts.get("links") or []]
-    ends += [(t["host"], t["port"], "http", "") for t in hosts.get("scrape") or []]
+    ends += [(t["host"], t["port"], "http", str(t.get("job", "")).upper().replace("-", "_"))
+             for t in hosts.get("scrape") or []]  # a monitoring job named like the key: prepub
     for host, port, scheme, key in ends:
-        if host in here or (host, port) in seen:
+        if host in here or str(host).lower().endswith(".localhost") or (host, port) in seen:
             continue
         seen.add((host, port))
         path = next((p for k, p in HEALTH_PATHS.items() if k in key), None)
