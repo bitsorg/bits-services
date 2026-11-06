@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for bits-admin-helper.py (the unlocking functions faked)."""
 
+import contextlib
 import importlib.util
 import io
 import json
@@ -60,6 +61,22 @@ class HelperTest(unittest.TestCase):
                          {"ok": False, "error": "the signer already holds a key"})
         self.assertEqual(self.h.handle({"op": "push-secrets", "passphrase": "right-pass-9"}),
                          {"ok": True, "pushed": {"credentials-proxy": ["gitlab-read"]}})
+
+    def test_hosts(self):
+        calls = []
+        h = helper.Helper(dict(self.fakes.ops(), hosts=lambda: calls.append(1) or {"host": "bits"}),
+                          now=lambda: self.t[0])
+        self.assertEqual(h.handle({"op": "hosts"}), {"host": "bits", "ok": True})
+        h.handle({"op": "hosts"})
+        self.t[0] += helper.HOSTS_TTL + 1
+        h.handle({"op": "hosts"})
+        self.assertEqual(len(calls), 2)  # the second answer came from the cache
+        leak = ValueError("'s3cr3t' does not appear to be an IPv4 or IPv6 address")
+        h = helper.Helper(dict(self.fakes.ops(), hosts=lambda: (_ for _ in ()).throw(leak)))
+        with contextlib.redirect_stderr(io.StringIO()):
+            answer = h.handle({"op": "hosts"})
+        self.assertEqual(answer["ok"], False)
+        self.assertNotIn("s3cr3t", json.dumps(answer))
 
     def test_check_the_passphrase(self):
         check = lambda pw: self.h.handle({"op": "check-signer-passphrase", "passphrase": pw})
