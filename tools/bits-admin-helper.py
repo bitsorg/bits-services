@@ -10,6 +10,8 @@ bits-admin container's group can open; one JSON request per connection:
     {"op": "hosts"}       (tools/site_hosts.py: services, ports, networks, where they point)
     {"op": "check"}       (probes each connection of hosts once: health URLs, TCP connects)
     {"op": "settings"}    (tools/site_settings.py: every setting, secrets only as set or not)
+    {"op": "settings-plan", "changes": {...}}           (what .env would become)
+    {"op": "settings-apply", "changes": {...}, "base": "<hash>"}   (writes .env, a backup kept)
     {"op": "check-signer-passphrase", "passphrase": "..."}
     {"op": "unlock-signer", "passphrase": "..."}
     {"op": "push-secrets", "passphrase": "..."}
@@ -43,11 +45,12 @@ import unlocking  # noqa: E402
 SOCKET = os.environ.get("BITS_ADMIN_HELPER_SOCKET", "/run/bits-admin-helper/helper.sock")
 GROUP = os.environ.get("BITS_ADMIN_HELPER_GROUP", "bits-admin-helper")
 GID = int(os.environ.get("BITS_ADMIN_HELPER_GID", "10004"))  # the one bits-admin's container joins
-MAX_REQUEST = 4096
+MAX_REQUEST = 65536  # a settings plan carries the changed values
 TIMEOUT = 15
 FAILURES, WINDOW = 5, 600  # wrong passphrases allowed per window (seconds)
 HOSTS_TTL = 30  # seconds a hosts answer is reused
-OPS = ("status", "hosts", "check", "settings", "check-signer-passphrase", "unlock-signer", "push-secrets")
+OPS = ("status", "hosts", "check", "settings", "settings-plan", "settings-apply", "check-signer-passphrase",
+       "unlock-signer", "push-secrets")
 
 
 def log(text):
@@ -88,6 +91,7 @@ class Helper:
                                                  up=site_hosts.scrape_up()),
                            "probe": site_hosts.check,
                            "settings": site_settings.collect,
+                           "settings-plan": site_settings.plan, "settings-apply": site_settings.apply,
                            "check": lambda pw: unlocking.decrypt_signing_seed(unlocking.SIGN_KEY, pw),
                            "unlock": unlocking.unlock_signer,
                            "load": unlocking.load_service_secrets,
@@ -120,6 +124,18 @@ class Helper:
             except Exception as e:  # never its text: it could quote a value
                 log("settings failed: %s" % type(e).__name__)
                 return {"ok": False, "error": "the settings could not be read; see the helper's journal"}
+        if op in ("settings-plan", "settings-apply"):
+            try:
+                if op == "settings-plan":
+                    return dict(self.ops[op](request.get("changes")), ok=True)
+                done = self.ops[op](request.get("changes"), str(request.get("base", "")))
+                log("settings-apply: %s" % (", ".join(done["keys"]) or "nothing changed"))
+                return dict(done, ok=True)
+            except site_settings.Refused as e:  # its own words: names and rules, never a kept value
+                return {"ok": False, "error": str(e)}
+            except Exception as e:
+                log("%s failed: %s" % (op, type(e).__name__))
+                return {"ok": False, "error": "it failed; see the helper's journal"}
         if op == "check":  # probes other hosts: at most one run per HOSTS_TTL
             if self.checked and self.now() - self.checked[0] < HOSTS_TTL:
                 return self.checked[1]

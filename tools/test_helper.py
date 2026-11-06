@@ -88,6 +88,25 @@ class HelperTest(unittest.TestCase):
             self.assertEqual(answer["ok"], False)
             self.assertNotIn("hunter2", json.dumps(answer) + err.getvalue())
 
+    def test_settings_plan_and_apply(self):
+        seen = []
+        ops = dict(self.fakes.ops(), **{"settings-plan": lambda c: seen.append(("plan", c)) or {"base": "h", "diff": []},
+                                        "settings-apply": lambda c, b: seen.append(("apply", c, b)) or
+                                        {"written": True, "backup": ".env.bak-1", "keys": ["VM_RETENTION"]}})
+        h = helper.Helper(ops)
+        self.assertEqual(h.handle({"op": "settings-plan", "changes": {"set": {}}}), {"base": "h", "diff": [], "ok": True})
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertTrue(h.handle({"op": "settings-apply", "changes": {}, "base": "h"})["ok"])
+        self.assertIn("settings-apply: VM_RETENTION", err.getvalue())
+        self.assertEqual(seen[1], ("apply", {}, "h"))
+        refusing = helper.Helper(dict(ops, **{"settings-plan": lambda c: (_ for _ in ()).throw(
+            helper.site_settings.Refused("not here, they are secrets: X"))}))
+        self.assertEqual(refusing.handle({"op": "settings-plan"}), {"ok": False, "error": "not here, they are secrets: X"})
+        quoting = helper.Helper(dict(ops, **{"settings-plan": lambda c: (_ for _ in ()).throw(
+            ValueError("invalid literal for int(): 'hunter2'"))}))
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertNotIn("hunter2", json.dumps(quoting.handle({"op": "settings-plan"})))
+
     def test_check_runs_at_most_once_a_while(self):
         runs = []
         h = helper.Helper(dict(self.fakes.ops(), hosts=lambda: {"host": "bits"},
