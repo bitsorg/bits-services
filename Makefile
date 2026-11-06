@@ -6,7 +6,7 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help init config build audit-token up down ps status logs unlock secret credentials-check helper-unit helper-install admin-install admin-up admin-code test clean monitoring monitoring-check
+.PHONY: help init config build audit-token up down ps status logs unlock secret credentials-check helper-unit helper-install admin-install admin-up admin-code admin-reset test clean monitoring monitoring-check
 
 # The monitoring stack (Phase 4), started on its own by `make monitoring`.
 MON_SERVICES := victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
@@ -67,8 +67,16 @@ admin-install:  ## As root: the bits-admin group and user if missing, /run/bits-
 admin-up:  ## Start bits-admin and wait until it answers on /run/bits-admin/admin.sock
 	@COMPOSE="$(COMPOSE)" bash scripts/admin-up.sh
 
-admin-code:  ## Print bits-admin's setup code (each signs in once; restart it for a new one)
+admin-code:  ## Print bits-admin's setup code (at bootstrap, or after admin-reset; each signs in once)
 	@cat /run/bits-admin/setup-code
+
+admin-reset:  ## As root, all keys lost: restart bits-admin with a setup code valid 30 minutes
+	@test "$$(id -u)" = 0 || { echo "run as root: sudo make admin-reset"; exit 1; }
+	install -m 0600 /dev/null /run/bits-admin/reset
+	$(COMPOSE) --profile admin restart bits-admin || { rm -f /run/bits-admin/reset; exit 1; }
+	@COMPOSE="$(COMPOSE)" bash scripts/admin-up.sh
+	@test ! -e /run/bits-admin/reset || { rm -f /run/bits-admin/reset; echo "bits-admin did not take the reset" >&2; exit 1; }
+	@echo "the setup code works for 30 minutes: make admin-code"
 
 test:  ## Functional wiring check (proxy up, backend https/healthz, backend→proxy)
 	bash scripts/functional-test.sh
