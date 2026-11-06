@@ -78,6 +78,16 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(answer["ok"], False)
         self.assertNotIn("s3cr3t", json.dumps(answer))
 
+    def test_settings(self):
+        h = helper.Helper(dict(self.fakes.ops(), settings=lambda: {"settings": []}))
+        self.assertEqual(h.handle({"op": "settings"}), {"settings": [], "ok": True})
+        for e in (ValueError("KEY: 'hunter2'"), AttributeError("hunter2")):
+            bad = helper.Helper(dict(self.fakes.ops(), settings=lambda e=e: (_ for _ in ()).throw(e)))
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                answer = bad.handle({"op": "settings"})
+            self.assertEqual(answer["ok"], False)
+            self.assertNotIn("hunter2", json.dumps(answer) + err.getvalue())
+
     def test_check_runs_at_most_once_a_while(self):
         runs = []
         h = helper.Helper(dict(self.fakes.ops(), hosts=lambda: {"host": "bits"},

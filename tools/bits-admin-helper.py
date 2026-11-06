@@ -9,6 +9,7 @@ bits-admin container's group can open; one JSON request per connection:
     {"op": "status"}
     {"op": "hosts"}       (tools/site_hosts.py: services, ports, networks, where they point)
     {"op": "check"}       (probes each connection of hosts once: health URLs, TCP connects)
+    {"op": "settings"}    (tools/site_settings.py: every setting, secrets only as set or not)
     {"op": "check-signer-passphrase", "passphrase": "..."}
     {"op": "unlock-signer", "passphrase": "..."}
     {"op": "push-secrets", "passphrase": "..."}
@@ -36,6 +37,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import site_hosts  # noqa: E402
+import site_settings  # noqa: E402
 import unlocking  # noqa: E402
 
 SOCKET = os.environ.get("BITS_ADMIN_HELPER_SOCKET", "/run/bits-admin-helper/helper.sock")
@@ -45,7 +47,7 @@ MAX_REQUEST = 4096
 TIMEOUT = 15
 FAILURES, WINDOW = 5, 600  # wrong passphrases allowed per window (seconds)
 HOSTS_TTL = 30  # seconds a hosts answer is reused
-OPS = ("status", "hosts", "check", "check-signer-passphrase", "unlock-signer", "push-secrets")
+OPS = ("status", "hosts", "check", "settings", "check-signer-passphrase", "unlock-signer", "push-secrets")
 
 
 def log(text):
@@ -85,6 +87,7 @@ class Helper:
                            "hosts": lambda: dict(site_hosts.collect(unlocking._compose, compose_health()),
                                                  up=site_hosts.scrape_up()),
                            "probe": site_hosts.check,
+                           "settings": site_settings.collect,
                            "check": lambda pw: unlocking.decrypt_signing_seed(unlocking.SIGN_KEY, pw),
                            "unlock": unlocking.unlock_signer,
                            "load": unlocking.load_service_secrets,
@@ -111,6 +114,12 @@ class Helper:
                 return {"ok": False, "error": "docker compose config failed; see the helper's journal"}
             self.hosts = (self.now(), answer)
             return answer
+        if op == "settings":  # read-only: files on this host
+            try:
+                return dict(self.ops["settings"](), ok=True)
+            except Exception as e:  # never its text: it could quote a value
+                log("settings failed: %s" % type(e).__name__)
+                return {"ok": False, "error": "the settings could not be read; see the helper's journal"}
         if op == "check":  # probes other hosts: at most one run per HOSTS_TTL
             if self.checked and self.now() - self.checked[0] < HOSTS_TTL:
                 return self.checked[1]
@@ -225,7 +234,7 @@ def _answer(conn, helper):
 
 def ask(op, path=SOCKET):
     request = {"op": op}
-    if op not in ("status", "hosts", "check"):
+    if op not in ("status", "hosts", "check", "settings"):
         request["passphrase"] = getpass.getpass("Passphrase: ")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
         c.settimeout(120)
