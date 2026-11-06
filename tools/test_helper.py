@@ -23,7 +23,7 @@ UnlockError = helper.unlocking.UnlockError
 
 class Fakes:
     def __init__(self):
-        self.state, self.calls = "no key", []
+        self.state, self.calls, self.saved, self.exists, self.push_error = "no key", [], None, True, None
 
     def ops(self):
         def unlock(pw):
@@ -36,16 +36,33 @@ class Fakes:
         def load(pw):
             if pw != b"right-pass-9":
                 raise helper.unlocking.WrongPassphrase("wrong passphrase, or secrets/service-secrets.enc is damaged")
-            return {"gitlab-read": "glpat-x"}
+            return dict(self.saved) if self.saved is not None else {"gitlab-read": "glpat-x"}
+
         def check(pw):
             self.calls.append(("check", pw))
             if pw != b"right-pass-9":
                 raise helper.unlocking.WrongPassphrase("wrong passphrase, or not an encrypted Ed25519 key")
             return "c2VlZA=="
+        def save(pw, secrets):
+            self.calls.append(("save", pw, dict(secrets)))
+            self.saved = dict(secrets)
+
+        @contextlib.contextmanager
+        def lock():
+            self.calls.append(("lock",))
+            yield
+            self.calls.append(("unlock-file",))
+
+        def push(secrets):
+            if isinstance(self.push_error, Exception):
+                raise self.push_error
+            if self.push_error:
+                raise helper.unlocking.UnlockError(self.push_error)
+            return {"credentials-proxy": sorted(secrets)}
         return {"health": lambda: {"security-proxy": "healthy"}, "check": check,
                 "signer": lambda: (self.state, "43fd71705f29a075ffff" if self.state == "loaded" else ""),
                 "unlock": unlock, "load": load,
-                "push": lambda secrets: {"credentials-proxy": sorted(secrets)}}
+                "save": save, "exists": lambda: self.exists, "push": push, "lock": lock}
 
 
 class HelperTest(unittest.TestCase):
@@ -61,6 +78,48 @@ class HelperTest(unittest.TestCase):
                          {"ok": False, "error": "the signer already holds a key"})
         self.assertEqual(self.h.handle({"op": "push-secrets", "passphrase": "right-pass-9"}),
                          {"ok": True, "pushed": {"credentials-proxy": ["gitlab-read"]}})
+
+    def test_service_secrets(self):
+        ask = lambda **r: self.h.handle(dict(r, passphrase=r.get("passphrase", "right-pass-9")))
+        self.assertEqual(ask(op="secrets-list"), {"ok": True, "slots": ["gitlab-read"]})  # names only
+        self.assertEqual(ask(op="secret-set", slot="gitlab-ops", value=" glpat-o \n"),
+                         {"ok": True, "slots": ["gitlab-ops", "gitlab-read"],
+                          "pushed": {"credentials-proxy": ["gitlab-ops", "gitlab-read"]}})
+        self.assertEqual(self.fakes.saved["gitlab-ops"], "glpat-o")
+        self.fakes.push_error = "credentials-proxy is not running"
+        answer = ask(op="secret-remove", slot="gitlab-read")
+        self.assertEqual((answer["ok"], answer["slots"], answer["push_error"]),
+                         (True, ["gitlab-ops"], "credentials-proxy is not running"))  # saved all the same
+        steps = [c[0] for c in self.fakes.calls if c[0] in ("lock", "save", "unlock-file")]
+        self.assertEqual(steps[2:5], ["lock", "save", "unlock-file"])          # saved under the lock
+        self.fakes.push_error = OSError("socket")
+        answer = ask(op="secret-set", slot="gitlab-read", value="glpat-r")
+        self.assertEqual((answer["ok"], answer["push_error"]), (True, "not pushed (OSError); make unlock pushes it"))
+        self.fakes.push_error = None
+        for request, said in ((dict(op="secret-remove", slot="gitlab-x"), "no slot gitlab-x"),
+                              (dict(op="secret-set", slot="gitlab-read\n", value="x"), "a slot is a name"),
+                              (dict(op="secret-set", slot="Bad Slot", value="x"), "a slot is a name"),
+                              (dict(op="secret-set", slot="gitlab-ops", value="a\nb"), "one line"),
+                              (dict(op="secret-set", slot="gitlab-ops", value=" "), "one line")):
+            answer = ask(**request)
+            self.assertFalse(answer["ok"], request)
+            self.assertIn(said, answer["error"])
+        saves = len([c for c in self.fakes.calls if c[0] == "save"])
+        self.assertIn("wrong passphrase", ask(op="secret-set", slot="gitlab-ops", value="x", passphrase="wrong")["error"])
+        self.assertEqual(len(self.h.failures), 1)
+        self.assertEqual(len([c for c in self.fakes.calls if c[0] == "save"]), saves)  # nothing saved
+
+    def test_a_first_secret_takes_the_signers_passphrase(self):
+        self.fakes.exists = False
+        self.assertTrue(self.h.handle({"op": "secret-set", "passphrase": "right-pass-9", "slot": "gitlab-ops",
+                                       "value": "x"})["ok"])
+        self.assertEqual([c[0] for c in self.fakes.calls if c[0] in ("check", "save")], ["check", "save"])
+        self.fakes.calls, self.fakes.saved = [], None
+        answer = self.h.handle({"op": "secret-set", "passphrase": "not-the-signers", "slot": "gitlab-ops", "value": "x"})
+        self.assertFalse(answer["ok"])
+        self.assertIn("wrong passphrase", answer["error"])
+        self.assertEqual(len(self.h.failures), 1)                       # counts towards the lockout
+        self.assertFalse([c for c in self.fakes.calls if c[0] == "save"])
 
     def test_hosts(self):
         calls = []

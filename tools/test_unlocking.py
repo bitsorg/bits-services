@@ -78,6 +78,8 @@ class UnlockingTest(unittest.TestCase):
         ss.FILE = os.path.join(self.tmp.name, "service-secrets.enc")
         ss.save(b"secret-pass", {"gitlab-read": "glpat-r", "s3-access-b": "AK", "gitlab-mirror": "glpat-m"})
         secrets = ul.load_service_secrets(b"secret-pass", ss.FILE)
+        self.assertEqual(oct(os.stat(ss.FILE).st_mode & 0o777), "0o600")
+        self.assertEqual([f for f in os.listdir(self.tmp.name) if f.startswith(".service-secrets.")], [])
         with self.assertRaises(ul.UnlockError):
             ul.load_service_secrets(b"wrong-pass", ss.FILE)
         self.fake.running = ("credentials-proxy", "store-writer")
@@ -86,6 +88,20 @@ class UnlockingTest(unittest.TestCase):
                                  "store-writer": ["gitlab-mirror", "s3-access-b"]})
         pushes = [a[a.index("push") + 1] for a, _ in self.fake.calls if "push" in a]
         self.assertEqual(pushes[:2], [ul.CERT_SLOT, ul.CERT_SLOT])  # certificates first
+
+    def test_service_secrets_lock(self):
+        import fcntl
+        path = os.path.join(self.tmp.name, "service-secrets.enc")
+        with ul.service_secrets_lock(path):
+            fd = os.open(self.tmp.name, os.O_RDONLY)
+            try:
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)            # held
+            finally:
+                os.close(fd)
+        fd = os.open(self.tmp.name, os.O_RDONLY)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)                         # released
+        os.close(fd)
 
     def test_writer_configured_but_down(self):
         real = ul._writer_configured

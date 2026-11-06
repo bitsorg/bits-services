@@ -16,6 +16,9 @@ bits-admin container's group can open; one JSON request per connection:
     {"op": "check-signer-passphrase", "passphrase": "..."}
     {"op": "unlock-signer", "passphrase": "..."}
     {"op": "push-secrets", "passphrase": "..."}
+    {"op": "secrets-list", "passphrase": "..."}                    (slot names only)
+    {"op": "secret-set", "passphrase": "...", "slot": "gitlab-read", "value": "..."}
+    {"op": "secret-remove", "passphrase": "...", "slot": "gitlab-read"}
 
 check-signer-passphrase decrypts the signing key and forgets it, so bits-admin can
 check a passphrase before storing it (also while a key is loaded; the lockout below
@@ -33,6 +36,7 @@ import getpass
 import grp
 import json
 import os
+import re
 import socket
 import struct
 import sys
@@ -51,7 +55,10 @@ TIMEOUT = 15
 FAILURES, WINDOW = 5, 600  # wrong passphrases allowed per window (seconds)
 HOSTS_TTL = 30  # seconds a hosts answer is reused
 OPS = ("status", "hosts", "check", "settings", "settings-plan", "settings-apply", "check-signer-passphrase",
-       "unlock-signer", "push-secrets")
+       "unlock-signer", "push-secrets", "secrets-list", "secret-set", "secret-remove")
+SECRET_OPS = ("secrets-list", "secret-set", "secret-remove")
+SLOT = re.compile(r"[a-z0-9][a-z0-9.-]{0,62}")  # gitlab-read, s3-access-<bucket>; fullmatch
+VALUE_MAX = 8192
 
 
 def log(text):
@@ -96,6 +103,9 @@ class Helper:
                            "check": lambda pw: unlocking.decrypt_signing_seed(unlocking.SIGN_KEY, pw),
                            "unlock": unlocking.unlock_signer,
                            "load": unlocking.load_service_secrets,
+                           "save": unlocking.save_service_secrets,
+                           "exists": lambda: os.path.exists(unlocking.SECRETS_FILE),
+                           "lock": unlocking.service_secrets_lock,
                            "push": unlocking.push_service_secrets}
         self.now, self.failures, self.hosts, self.checked = now, collections.deque(), None, None
 
@@ -166,12 +176,51 @@ class Helper:
             if op == "unlock-signer":
                 _, keyid = self.ops["unlock"](passphrase.encode())
                 return {"ok": True, "key_id16": keyid[:16]}
+            if op in SECRET_OPS:
+                return self._secrets(op, request, passphrase.encode())
             pushed = self.ops["push"](self.ops["load"](passphrase.encode()))
             return {"ok": True, "pushed": pushed}
         except unlocking.UnlockError as e:  # its message names a step, never a value
             if isinstance(e, unlocking.WrongPassphrase):
                 self.failures.append(self.now())
             return {"ok": False, "error": str(e)}
+
+
+    def _secrets(self, op, request, passphrase):
+        """The service secrets by name; set or remove one, then push them all. Raises
+        UnlockError (WrongPassphrase counts towards the lockout)."""
+        slot, value = request.get("slot"), request.get("value")
+        if op != "secrets-list" and not (isinstance(slot, str) and SLOT.fullmatch(slot)):
+            return {"ok": False, "error": "a slot is a name like gitlab-read or s3-access-<bucket>"}
+        if op == "secret-set" and not (isinstance(value, str) and value.strip() and len(value) <= VALUE_MAX
+                                       and value.strip().isprintable()):
+            return {"ok": False, "error": "a value is one line of at most %d characters" % VALUE_MAX}
+        with self.ops["lock"]():
+            if not self.ops["exists"]():
+                self.ops["check"](passphrase)  # a first one takes the signer's passphrase
+            secrets = self.ops["load"](passphrase)
+            if op == "secrets-list":
+                return {"ok": True, "slots": sorted(secrets)}
+            if op == "secret-set":
+                secrets[slot] = value.strip()
+            elif secrets.pop(slot, None) is None:
+                return {"ok": False, "error": "no slot %s" % slot}
+            try:
+                self.ops["save"](passphrase, secrets)
+            except OSError as e:
+                log("%s %s: not saved (%s)" % (op, slot, type(e).__name__))
+                return {"ok": False, "error": "secrets/service-secrets.enc could not be written; see the helper's journal"}
+        log("%s: %s" % (op, slot))
+        answer = {"ok": True, "slots": sorted(secrets), "pushed": {}}
+        try:
+            if secrets:
+                answer["pushed"] = self.ops["push"](secrets)
+        except unlocking.UnlockError as e:  # saved; the next unlock pushes it
+            answer["push_error"] = str(e)
+        except Exception as e:  # saved all the same: say so, never its text
+            log("%s %s: saved, not pushed (%s)" % (op, slot, type(e).__name__))
+            answer["push_error"] = "not pushed (%s); make unlock pushes it" % type(e).__name__
+        return answer
 
 
 def _peer(conn):

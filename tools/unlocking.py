@@ -10,12 +10,14 @@ the loaded key's id back through its sign route. Nothing touches disk.
 """
 
 import base64
+import contextlib
 import datetime
 import getpass
 import json
 import os
 import subprocess
 import sys
+import tempfile
 
 DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INGEST = "/run/security-proxy-ingest/ingest.sock"
@@ -122,6 +124,60 @@ def load_service_secrets(passphrase, path=SECRETS_FILE):
     except Exception:
         raise WrongPassphrase("wrong passphrase, or %s is damaged" % path)
     return json.loads(plain)
+
+
+def save_service_secrets(passphrase, secrets, path=SECRETS_FILE):
+    """Encrypts *secrets* to *path* in one step, mode 600, its owner kept (a new file:
+    its directory's), so `make secret` still reads what the host helper wrote."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    salt, nonce = os.urandom(16), os.urandom(12)
+    ct = AESGCM(_scrypt(passphrase, salt)).encrypt(
+        nonce, json.dumps(secrets, sort_keys=True).encode(), b"service-secrets/1")
+    box = {"v": 1, "kdf": "scrypt", "n": 2 ** 15, "r": 8, "p": 1,
+           "salt": base64.b64encode(salt).decode(), "nonce": base64.b64encode(nonce).decode(),
+           "ct": base64.b64encode(ct).decode()}
+    directory = os.path.dirname(os.path.abspath(path))
+    if not os.path.isdir(directory):
+        os.makedirs(directory, mode=0o700)
+        parent = os.stat(os.path.dirname(directory))
+        if os.getuid() == 0:  # the host helper: the checkout's owner, not root
+            os.chown(directory, parent.st_uid, parent.st_gid)
+    st = os.lstat(path) if os.path.lexists(path) else os.stat(directory)
+    fd, tmp = tempfile.mkstemp(prefix=".service-secrets.", dir=directory)
+    try:
+        with os.fdopen(fd, "w") as f:
+            os.fchmod(fd, 0o600)
+            if (st.st_uid, st.st_gid) != (os.getuid(), os.getgid()):
+                os.fchown(fd, st.st_uid, st.st_gid)
+            json.dump(box, f)
+            f.flush()
+            os.fsync(fd)
+        os.replace(tmp, path)
+        dfd = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(dfd)  # the rename lasts a crash
+        finally:
+            os.close(dfd)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+@contextlib.contextmanager
+def service_secrets_lock(path=SECRETS_FILE):
+    """Held from load to save, by the host helper and service-secrets.py alike, so neither
+    writes back an older copy over the other's change (a lock on the directory itself)."""
+    import fcntl
+    directory = os.path.dirname(os.path.abspath(path))
+    if not os.path.isdir(directory):
+        yield
+        return
+    fd = os.open(directory, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
 
 
 def _throwaway_cert():

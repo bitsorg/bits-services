@@ -30,17 +30,13 @@ value at once; the services do not restart.
 """
 
 import argparse
-import base64
 import getpass
-import json
 import os
 import subprocess
 import sys
 
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
 import unlocking
-from unlocking import DIR, SECRETS_FILE as FILE, UnlockError, _env_file, _scrypt as _key
+from unlocking import DIR, SECRETS_FILE as FILE, UnlockError, _env_file
 # .env variables `import-env` takes, by slot.
 # gitlab-read as the services read today: with the read token, else the ops token.
 FROM_ENV = {"gitlab-read": ("BITS_FORGE_READ_TOKEN", "BITS_FORGE_OPS_TOKEN"),
@@ -57,18 +53,7 @@ def load(passphrase):
 
 
 def save(passphrase, secrets):
-    salt, nonce = os.urandom(16), os.urandom(12)
-    ct = AESGCM(_key(passphrase, salt)).encrypt(
-        nonce, json.dumps(secrets, sort_keys=True).encode(), b"service-secrets/1")
-    box = {"v": 1, "kdf": "scrypt", "n": 2 ** 15, "r": 8, "p": 1,
-           "salt": base64.b64encode(salt).decode(), "nonce": base64.b64encode(nonce).decode(),
-           "ct": base64.b64encode(ct).decode()}
-    os.makedirs(os.path.dirname(FILE), exist_ok=True)
-    tmp = FILE + ".tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        json.dump(box, fh)
-    os.replace(tmp, FILE)
+    unlocking.save_service_secrets(passphrase, secrets, FILE)
 
 
 def passphrase(new=False):
@@ -153,13 +138,19 @@ def main():
     if a.command in ("set", "remove") and not a.slot:
         ap.error("%s needs a slot name" % a.command)
     p = passphrase(new=a.command in ("set", "import-env"))
+    value = _value(a.slot) if a.command == "set" else None  # asked before the lock is taken
+    with unlocking.service_secrets_lock(FILE):  # bits-admin may change them meanwhile
+        _change(a, p, value)
+
+
+def _change(a, p, value):
     secrets = load(p)
     if a.command == "list":
         for k in sorted(secrets):
             print(k)
         return
     if a.command == "set":
-        secrets[a.slot] = _value(a.slot)
+        secrets[a.slot] = value
         save(p, secrets)
         print("stored %s (%d slot(s)); push it with: make unlock" % (a.slot, len(secrets)))
     elif a.command == "remove":
