@@ -24,9 +24,10 @@ config:  ## Validate the compose file
 build:  ## Build service images
 	$(COMPOSE) build
 
-audit-token:  ## Create the audit-log token (secrets/audit_token) once
+audit-token:  ## Create the audit-log tokens (secrets/audit_token, secrets/audit-chains/*/token) once
 	@mkdir -p -m 700 secrets
 	@test -s secrets/audit_token || { umask 022; python3 -c "import secrets; print(secrets.token_urlsafe(32))" > secrets/audit_token; echo "created secrets/audit_token"; }
+	@umask 022; test -s secrets/audit-chains/bits-admin/token || { mkdir -p secrets/audit-chains/bits-admin && python3 -c "import secrets; print(secrets.token_urlsafe(32))" > secrets/audit-chains/bits-admin/token && echo "created secrets/audit-chains/bits-admin/token"; } || { echo "cannot write secrets/audit-chains (made by Docker as root?): sudo chown -R $$(id -un) secrets/audit-chains" >&2; exit 1; }
 	@test -d $${AUDIT_DATA_DIR:-./data/audit-log} || echo "create the audit-log data dir: sudo install -d -o 65534 -g 65534 $${AUDIT_DATA_DIR:-./data/audit-log}"
 
 up: audit-token  ## Start services (detached), then check signing (a new proxy needs make unlock)
@@ -64,7 +65,7 @@ helper-install:  ## As root: the helper's group if missing, its unit for this ch
 admin-install:  ## As root: the bits-admin group and user if missing, /run/bits-admin, admin-data/
 	bash scripts/admin-install.sh
 
-admin-up:  ## Start bits-admin and wait until it answers on /run/bits-admin/admin.sock
+admin-up: audit-token  ## Start bits-admin and wait until it answers on /run/bits-admin/admin.sock
 	@COMPOSE="$(COMPOSE)" bash scripts/admin-up.sh
 
 admin-code:  ## Print bits-admin's setup code (at bootstrap, or after admin-reset; each signs in once)

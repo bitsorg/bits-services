@@ -413,8 +413,8 @@ services:
       start_period: 60s
 
   # bits-admin (ADR bits-services 0001): the site's admin page, on a unix socket that
-  # admins reach through an SSH tunnel; no network. Off unless asked: make admin-up
-  # (after sudo make admin-install). It asks the host helper for status and unlock.
+  # admins reach through an SSH tunnel; its only network reaches audit-log. Off unless
+  # asked: make admin-up (after sudo make admin-install).
   bits-admin:
     image: bits-services/bits-console-backend:${BITS_IMAGE_TAG:-local}
     pull_policy: never          # built by bits-console-backend above
@@ -425,7 +425,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-    network_mode: none
+    networks:
+      - admin-audit-net         # audit-log alone; internal, no way out
     cap_drop:
       - ALL
     security_opt:
@@ -443,7 +444,11 @@ services:
       BITS_ADMIN_ORIGINS: "${BITS_ADMIN_ORIGINS:-http://bits-admin.localhost:8800}"
       BITS_ADMIN_SECURITY_KEYS_ONLY: "${BITS_ADMIN_SECURITY_KEYS_ONLY:-}"
       BITS_ADMIN_DATA: /var/lib/bits-admin
+      # Its audit chain's copy in audit-log; empty to keep it here only.
+      BITS_ADMIN_AUDIT_URL: "${BITS_ADMIN_AUDIT_URL-http://audit-log:8443}"
+      BITS_ADMIN_AUDIT_TOKEN_FILE: /run/audit-chain/token
     volumes:
+      - ./secrets/audit-chains/bits-admin:/run/audit-chain:ro   # make audit-token
       - /run/bits-admin:/run/bits-admin
       - type: bind                # never created by Docker (it would be root's)
         source: ./admin-data
@@ -470,13 +475,17 @@ services:
       AUDIT_DATA: /data
       AUDIT_LISTEN: "0.0.0.0:8443"
       AUDIT_TOKEN_FILE: /run/secrets/audit_token
+      AUDIT_CHAINS: bits-admin                # chain-bits-admin.jsonl, its own token
+      AUDIT_CHAIN_TOKENS: /run/audit-chains
     secrets:
       - audit_token
     volumes:
+      - ./secrets/audit-chains:/run/audit-chains:ro
       # Must be writable by uid 65534 (nobody). Ideally on another disk; back it up.
       - ${AUDIT_DATA_DIR:-./data/audit-log}:/data
     networks:
       - audit-net
+      - admin-audit-net
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8443/healthz', timeout=3)"]
       interval: 30s
@@ -646,6 +655,10 @@ networks:
     driver: bridge
   # The worker (and vmagent) <-> audit-log. Internal: no way in or out.
   audit-net:
+    driver: bridge
+    internal: true
+  # bits-admin <-> audit-log, for bits-admin's chain. Internal; nothing else is on it.
+  admin-audit-net:
     driver: bridge
     internal: true
 
