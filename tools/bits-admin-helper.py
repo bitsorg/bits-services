@@ -81,7 +81,8 @@ class Helper:
 
     def __init__(self, ops=None, now=time.monotonic):
         self.ops = ops or {"health": compose_health, "signer": signer_state,
-                           "hosts": lambda: site_hosts.collect(unlocking._compose, compose_health()),
+                           "hosts": lambda: dict(site_hosts.collect(unlocking._compose, compose_health()),
+                                                 up=site_hosts.scrape_up()),
                            "check": lambda pw: unlocking.decrypt_signing_seed(unlocking.SIGN_KEY, pw),
                            "unlock": unlocking.unlock_signer,
                            "load": unlocking.load_service_secrets,
@@ -213,7 +214,7 @@ def _answer(conn, helper):
 
 def ask(op, path=SOCKET):
     request = {"op": op}
-    if op != "status":
+    if op not in ("status", "hosts"):
         request["passphrase"] = getpass.getpass("Passphrase: ")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
         c.settimeout(120)

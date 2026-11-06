@@ -8,11 +8,13 @@ monitoring scrapes. Only names, hosts and ports: never a value of a secret.
 """
 
 import json
+import math
 import os
 import re
 import socket
 import sys
-from urllib.parse import urlsplit
+import urllib.request
+from urllib.parse import urlencode, urlsplit
 
 import yaml
 
@@ -20,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from site_profile import SECRET_NAME  # noqa: E402
 
 DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VM_URL = os.environ.get("BITS_ADMIN_HELPER_VM_URL", "http://127.0.0.1:8428")  # VictoriaMetrics, on the host
 URL = re.compile(r"^(https?|s3|b3)://", re.I)
 PORTS = {"http": 80, "https": 443, "s3": 443, "b3": 443}
 
@@ -81,6 +84,35 @@ def scrape_view(text):
     return out
 
 
+def _query(expr, get):
+    data = get("%s/api/v1/query?%s" % (VM_URL, urlencode({"query": expr})))
+    return json.loads(data)["data"]["result"]
+
+
+def _get(url):
+    with urllib.request.urlopen(url, timeout=3) as r:
+        return r.read(1 << 20)
+
+
+def scrape_up(get=_get):
+    """{"targets": [{job, instance, up, last_up}]} from VictoriaMetrics' up, or {"error"}:
+    up 1 or 0 now; last_up the time (s) it last answered in the past day, or None."""
+    try:
+        now = _query("up", get)
+        last = {(r["metric"].get("job"), r["metric"].get("instance")): float(r["value"][1])
+                for r in _query("last_over_time(timestamp(up == 1)[1d])", get)}
+        targets = []
+        for r in now:
+            key, value = (r["metric"].get("job"), r["metric"].get("instance")), float(r["value"][1])
+            if math.isfinite(value):  # NaN or Inf: not a target's answer
+                when = last.get(key)
+                targets.append({"job": key[0] or "", "instance": key[1] or "", "up": int(value == 1),
+                                "last_up": when if when is not None and math.isfinite(when) else None})
+    except (OSError, ValueError, KeyError, TypeError, IndexError, ArithmeticError) as e:
+        return {"error": "VictoriaMetrics did not answer (%s)" % type(e).__name__}
+    return {"targets": sorted(targets, key=lambda t: (t["job"], t["instance"]))}
+
+
 def collect(compose, states, scrape_path=os.path.join(DIR, "monitoring", "scrape.yml"), host=None):
     """The whole answer; *compose(args)* is unlocking._compose, *states* {service: state}."""
     code, out, _ = compose(["config", "--profiles"])
@@ -104,4 +136,4 @@ def collect(compose, states, scrape_path=os.path.join(DIR, "monitoring", "scrape
 
 if __name__ == "__main__":
     import unlocking
-    print(json.dumps(collect(unlocking._compose, {}), indent=1))
+    print(json.dumps(dict(collect(unlocking._compose, {}), up=scrape_up()), indent=1))

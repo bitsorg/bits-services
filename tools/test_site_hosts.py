@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import site_hosts  # noqa: E402
@@ -92,6 +93,31 @@ class SiteHostsTest(unittest.TestCase):
             {"job": "node-exporter", "host": "node-exporter", "port": 9100, "labels": {}},
             {"job": "prepub", "host": "cvmfs-bits-01.cern.ch", "port": 8080, "labels": {"role": "publisher"}}])
         self.assertEqual(self.collect(scrape="{not yaml: [")[0]["scrape"], [])
+
+    def test_up_from_victoriametrics(self):
+        answers = {
+            "up": [{"metric": {"job": "prepub", "instance": "cvmfs-bits-01.cern.ch:8080"}, "value": [1, "1"]},
+                   {"metric": {"job": "prepub", "instance": "bits-build-01.cern.ch:8080"}, "value": [1, "0"]}],
+            "last_over_time(timestamp(up == 1)[1d])": [
+                {"metric": {"job": "prepub", "instance": "bits-build-01.cern.ch:8080"}, "value": [1, "1762000000"]}]}
+        asked = []
+
+        def get(url):
+            asked.append(url)
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["query"][0]
+            return json.dumps({"data": {"result": answers[query]}}).encode()
+        self.assertEqual(site_hosts.scrape_up(get), {"targets": [
+            {"job": "prepub", "instance": "bits-build-01.cern.ch:8080", "up": 0, "last_up": 1762000000.0},
+            {"job": "prepub", "instance": "cvmfs-bits-01.cern.ch:8080", "up": 1, "last_up": None}]})
+        self.assertEqual(asked[0], site_hosts.VM_URL + "/api/v1/query?query=up")
+        answers["up"].append({"metric": {"job": "x", "instance": "y"}, "value": [1, "NaN"]})
+        answers["last_over_time(timestamp(up == 1)[1d])"][0]["value"] = [1, "+Inf"]
+        got = site_hosts.scrape_up(get)["targets"]
+        self.assertEqual([(t["instance"], t["last_up"]) for t in got],
+                         [("bits-build-01.cern.ch:8080", None), ("cvmfs-bits-01.cern.ch:8080", None)])
+        self.assertEqual(site_hosts.scrape_up(lambda url: (_ for _ in ()).throw(OSError("refused"))),
+                         {"error": "VictoriaMetrics did not answer (OSError)"})
+        self.assertIn("error", site_hosts.scrape_up(lambda url: b"<html>"))
 
     def test_a_failing_config_is_an_error(self):
         with self.assertRaises(ValueError):
