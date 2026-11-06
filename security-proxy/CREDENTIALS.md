@@ -12,6 +12,9 @@ that keeps the secrets in memory and adds them to requests on the way out:
   groups' members).
 - **The store:** boto3 talks to the proxy with the gate token as its access key;
   the proxy re-signs every request with the bucket's real keypair (`s3` route).
+- **GitHub:** the catalog and the chat's docs call the proxy under `/github/`
+  with the gate token as a Bearer; the proxy sends the public-read token on to
+  `api.github.com` (`github-read` route).
 
 The gate tokens come from the proxy's agent socket, rotate daily, and are good
 for nothing but the proxy. The signer stays as it was: sign-only, no egress.
@@ -43,8 +46,15 @@ their own tokens, as now). Then, in `.env`:
 
 and `docker compose up -d bits-console-backend bits-orchestrator`. Once all is
 well, remove `BITS_FORGE_OPS_TOKEN`, `BITS_FORGE_READ_TOKEN`,
-`BITS_ADMIN_RESOLVE_TOKEN`, `BITS_ORCH_S3_ACCESS_KEY_ID` and
-`BITS_ORCH_S3_SECRET_ACCESS_KEY` from `.env` and restart the two again. Going
+`BITS_ADMIN_RESOLVE_TOKEN`, `BITS_ORCH_S3_ACCESS_KEY_ID`,
+`BITS_ORCH_S3_SECRET_ACCESS_KEY` and `BITS_GITHUB_TOKEN` from `.env` and restart
+the two again.
+
+A site that moved over before the `github-read` route: add it to
+`config/credentials-proxy/config.json` as in the sample, restart
+`credentials-proxy`, `make secret SLOT=github-read` (or set it on bits-admin's
+Secrets page), `make unlock`, then remove `BITS_GITHUB_TOKEN`. Without the route
+the services keep reading `BITS_GITHUB_TOKEN` as before. Going
 back is setting `BITS_CRED_PROXY_AGENT_SOCKET=` (empty) with the variables back.
 
 ## Day to day

@@ -225,6 +225,10 @@ def _writer_configured():
     return os.path.isfile(os.path.join(DIR, d, "config.json"))
 
 
+# Slots the proxy puts verbatim into a header that wants a scheme first: kept bare.
+AS_HEADER = {"github-read": "Bearer "}
+
+
 def push_service_secrets(secrets):
     """Pushes the service secrets into the running proxies; returns {service: [slots]}."""
     if not secrets:
@@ -244,7 +248,10 @@ def push_service_secrets(secrets):
     for slot in sorted(secrets):
         service = (WRITER if writer and (slot.startswith("s3-") or slot == "gitlab-mirror")
                    else CRED_PROXY)
-        push(slot, secrets[slot], service)
+        value = secrets[slot]
+        if slot in AS_HEADER and not value.startswith(AS_HEADER[slot]):
+            value = AS_HEADER[slot] + value
+        push(slot, value, service)
         where.setdefault(service, []).append(slot)
     return where
 

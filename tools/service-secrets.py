@@ -22,6 +22,8 @@ Each prompts for the passphrase. Slots (see security-proxy/credentials.sample.js
     gitlab-groups  read_api token that can read the admin groups' members
     gitlab-mirror  bits-manifests token that may push to main (M8b: the mirror),
                    pushed into the store writer, which only the worker reaches
+    github-read    public-read GitHub token (no scopes): the catalog, the chat's
+                   docs; stored bare, pushed as "Bearer <token>"
     s3-access-<bucket>, s3-secret-<bucket>    the store's keypair: pushed into
                    the store writer (M8a) when it runs, else the credentials proxy
 
@@ -42,7 +44,8 @@ from unlocking import DIR, SECRETS_FILE as FILE, UnlockError, _env_file
 FROM_ENV = {"gitlab-read": ("BITS_FORGE_READ_TOKEN", "BITS_FORGE_OPS_TOKEN"),
             "gitlab-ops": ("BITS_FORGE_OPS_TOKEN",),
             "gitlab-groups": ("BITS_ADMIN_RESOLVE_TOKEN",),
-            "gitlab-mirror": ("BITS_FORGE_MIRROR_TOKEN",)}
+            "gitlab-mirror": ("BITS_FORGE_MIRROR_TOKEN",),
+            "github-read": ("BITS_GITHUB_TOKEN",)}
 
 
 def load(passphrase):
@@ -105,6 +108,14 @@ for kind in ("read", "ops", "groups"):
             out["gitlab-groups group %s" % s.admins_group] = "ok" if r.status_code == 200 else r.status_code
     except Exception as e:
         out["gitlab-" + kind] = "%s: %s" % (type(e).__name__, e)
+try:
+    import requests
+    api, auth = credproxy.github(s)                 # /rate_limit costs nothing
+    r = requests.get(api + "/rate_limit", headers={"Authorization": auth} if auth else {}, timeout=20)
+    out["github" + (" (through the proxy)" if not api.startswith("https://api.github.com") else "")] = (
+        "ok, %s/hr" % r.json()["resources"]["core"]["limit"] if r.status_code == 200 else r.status_code)
+except Exception as e:
+    out["github"] = "%s: %s" % (type(e).__name__, e)
 bucket = (s.orch_store or "").split("::")[0][len("b3://"):].split("/")[0]
 if bucket:
     try:

@@ -103,6 +103,16 @@ class UnlockingTest(unittest.TestCase):
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)                         # released
         os.close(fd)
 
+    def test_github_read_is_pushed_as_a_header(self):
+        self.fake.running = ("credentials-proxy",)
+        ul.push_service_secrets({"github-read": "ghp_x", "gitlab-read": "glpat-r"})
+        pushed = {a[a.index("push") + 1]: i for a, i in self.fake.calls if "push" in a}
+        self.assertEqual(pushed["github-read"], "Bearer ghp_x")
+        self.assertEqual(pushed["gitlab-read"], "glpat-r")
+        ul.push_service_secrets({"github-read": "Bearer ghp_x"})               # stored with it: once
+        pushed = [i for a, i in self.fake.calls if "push" in a and a[a.index("push") + 1] == "github-read"]
+        self.assertEqual(pushed[-1], "Bearer ghp_x")
+
     def test_writer_configured_but_down(self):
         real = ul._writer_configured
         ul._writer_configured = lambda: True
