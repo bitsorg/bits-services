@@ -12,6 +12,7 @@ bits-admin container's group can open; one JSON request per connection:
     {"op": "settings"}    (tools/site_settings.py: every setting, secrets only as set or not)
     {"op": "settings-plan", "changes": {...}}           (what .env would become)
     {"op": "settings-apply", "changes": {...}, "base": "<hash>"}   (writes .env, a backup kept)
+        changes: the Settings form's, or {"profile": "<site-profile.yaml>"} (also saved)
     {"op": "check-signer-passphrase", "passphrase": "..."}
     {"op": "unlock-signer", "passphrase": "..."}
     {"op": "push-secrets", "passphrase": "..."}
@@ -45,7 +46,7 @@ import unlocking  # noqa: E402
 SOCKET = os.environ.get("BITS_ADMIN_HELPER_SOCKET", "/run/bits-admin-helper/helper.sock")
 GROUP = os.environ.get("BITS_ADMIN_HELPER_GROUP", "bits-admin-helper")
 GID = int(os.environ.get("BITS_ADMIN_HELPER_GID", "10004"))  # the one bits-admin's container joins
-MAX_REQUEST = 65536  # a settings plan carries the changed values
+MAX_REQUEST = 262144  # a settings plan carries the changed values, or a site-profile.yaml
 TIMEOUT = 15
 FAILURES, WINDOW = 5, 600  # wrong passphrases allowed per window (seconds)
 HOSTS_TTL = 30  # seconds a hosts answer is reused
@@ -121,6 +122,8 @@ class Helper:
         if op == "settings":  # read-only: files on this host
             try:
                 return dict(self.ops["settings"](), ok=True)
+            except site_settings.Refused as e:  # a linked or odd .env: its name and the rule
+                return {"ok": False, "error": str(e)}
             except Exception as e:  # never its text: it could quote a value
                 log("settings failed: %s" % type(e).__name__)
                 return {"ok": False, "error": "the settings could not be read; see the helper's journal"}
@@ -129,7 +132,9 @@ class Helper:
                 if op == "settings-plan":
                     return dict(self.ops[op](request.get("changes")), ok=True)
                 done = self.ops[op](request.get("changes"), str(request.get("base", "")))
-                log("settings-apply: %s" % (", ".join(done["keys"]) or "nothing changed"))
+                log("settings-apply: %s%s" % (", ".join(done["keys"]) or "nothing changed",
+                                              " and site-profile.yaml" if done.get("profile") else
+                                              "; " + done["profile_error"] if done.get("profile_error") else ""))
                 return dict(done, ok=True)
             except site_settings.Refused as e:  # its own words: names and rules, never a kept value
                 return {"ok": False, "error": str(e)}

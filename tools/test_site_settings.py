@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import site_profile  # noqa: E402
 import site_settings  # noqa: E402
 
 COMPOSE = """
@@ -135,9 +136,10 @@ class EditTest(unittest.TestCase):
         with open(os.path.join(self.dir, "compose.yml"), "w") as f:
             f.write('services:\n  a:\n    environment:\n      BITS_CATALOG_TTL: "${BITS_CATALOG_TTL:-300}"\n')
         with open(os.path.join(self.dir, "example"), "w") as f:
-            f.write("VM_RETENTION=13\nBITS_HOOK_URL=\n")
+            f.write("VM_RETENTION=13\nBITS_HOOK_URL=\nCOMPOSE_PROJECT_NAME=bits\n")
         patch = mock.patch.multiple(site_settings, COMPOSE=os.path.join(self.dir, "compose.yml"),
-                                    EXAMPLE=os.path.join(self.dir, "example"))
+                                    EXAMPLE=os.path.join(self.dir, "example"),
+                                    PROFILE=os.path.join(self.dir, "site-profile.yaml"))
         patch.start()
         self.addCleanup(patch.stop)
 
@@ -172,7 +174,7 @@ class EditTest(unittest.TestCase):
                               ({"set": {"VM_RETENTION": "1\nBITS_GITHUB_TOKEN=x"}}, "on one line"),
                               ({"set": {"VM_RETENTION": "1\u2028BITS_GITHUB_TOKEN=x"}}, "on one line"),
                               ({"set": {"VM_NODES": "3"}}, "nor .env.example knows"),
-                              ({"set": {"DOCKER_HOST": "tcp://h.example:2375"}}, "steers docker compose"),
+                              ({"set": {"COMPOSE_PROJECT_NAME": "other"}}, "steer docker compose"),
                               ({"follow": ["VM_RETENTION"]}, "follow no fact"),
                               ({"facts": {"site": "x"}}, "not facts"),
                               ({"facts": {"gitlab_url": "nohost"}}, "has no host"),
@@ -181,6 +183,96 @@ class EditTest(unittest.TestCase):
                 site_settings.plan(changes, self.env)
             self.assertIn(said, str(e.exception), changes)
             self.assertNotIn("ghp_", str(e.exception))
+
+    PROFILE = ("# our site\nfacts:\n  gitlab_url: https://gl.example.net\n"
+               "env:\n  VM_RETENTION: '24'\n  BITS_CATALOG_TTL: 600\n")
+
+    def test_a_profile_replaces_the_env(self):
+        with open(self.env, "a") as f:
+            f.write("OLD_SETTING='x'\n")
+        changes = {"profile": self.PROFILE}
+        planned = site_settings.plan(changes, self.env)
+        diff = {d["key"]: (d["old"], d["new"]) for d in planned["diff"]}
+        self.assertEqual(diff["VM_RETENTION"], ("13", "24"))
+        self.assertEqual(diff["BITS_CATALOG_TTL"], (None, "600"))
+        self.assertEqual(diff["BITS_OIDC_ISSUER"], ("https://gitlab.example.org", "https://gl.example.net"))
+        self.assertEqual(diff["OLD_SETTING"], ("x", None))                    # the profile does not name it
+        self.assertFalse({"BITS_GITHUB_TOKEN", "BITS_CHAT_URL"} & set(diff))
+        self.assertNotIn("ghp_", json.dumps(planned))
+        done = site_settings.apply(changes, planned["base"], self.env)
+        self.assertEqual(done["profile"], "site-profile.yaml")
+        with open(self.env) as f:
+            text = f.read()
+        self.assertIn("BITS_GITHUB_TOKEN=ghp_kept_as_written", text)
+        self.assertIn("BITS_CHAT_URL='https://u:pw@chat.example.org'", text)
+        saved = os.path.join(self.dir, "site-profile.yaml")
+        with open(saved) as f:
+            self.assertEqual(f.read(), self.PROFILE)                      # as written, comments too
+        self.assertEqual(oct(os.stat(saved).st_mode & 0o777), "0o600")
+        again = site_settings.plan(changes, self.env)
+        self.assertEqual(again["diff"], [])
+        self.assertIsNone(site_settings.apply(changes, again["base"], self.env)["profile"])  # unchanged
+
+    def test_what_a_profile_leaves_alone(self):
+        with open(self.env, "a") as f:
+            f.write("BITS_ORCH_AUDIT_TOKEN=/run/secrets/audit\nCOMPOSE_PROJECT_NAME=bits\n")
+        planned = site_settings.plan({"profile": self.PROFILE + "  BITS_HOOK_URL: 0x1f\n"}, self.env)
+        diff = {d["key"]: d["new"] for d in planned["diff"]}
+        self.assertFalse({"BITS_ORCH_AUDIT_TOKEN", "COMPOSE_PROJECT_NAME"} & set(diff))  # not named, kept
+        self.assertEqual(diff["BITS_HOOK_URL"], "0x1f")                    # as written, not 31
+        self.assertTrue(any(n.startswith("COMPOSE_PROJECT_NAME: kept") for n in planned["notes"]))
+
+    def test_a_profile_is_not_saved_through_a_link(self):
+        planned = site_settings.plan({"profile": self.PROFILE}, self.env)
+        os.symlink(self.env, os.path.join(self.dir, "site-profile.yaml"))
+        with self.assertRaises(site_settings.Refused) as e:
+            site_settings.apply({"profile": self.PROFILE}, planned["base"], self.env)
+        self.assertIn("symbolic link", str(e.exception))
+        with open(self.env) as f:
+            self.assertEqual(f.read(), self.ENV)                            # nothing written
+        os.unlink(self.env)
+        os.mkfifo(self.env)
+        with self.assertRaises(site_settings.Refused) as e:
+            site_settings.plan({}, self.env)                                # no hang on a FIFO
+        self.assertIn("not a file", str(e.exception))
+        os.unlink(self.env)
+        with open(self.env, "wb") as f:
+            f.write(b"X='\xff'\n")
+        with self.assertRaises(site_settings.Refused) as e:
+            site_settings.plan({}, self.env)
+        self.assertEqual(str(e.exception), ".env is not UTF-8 text")
+
+    def test_a_profile_that_cannot_be_saved(self):
+        planned = site_settings.plan({"profile": self.PROFILE}, self.env)
+        real = site_profile.write_env
+        failing = lambda path, text: (_ for _ in ()).throw(OSError(28, "No space")) if path.endswith(".yaml") \
+            else real(path, text)
+        with mock.patch.object(site_profile, "write_env", failing):
+            done = site_settings.apply({"profile": self.PROFILE}, planned["base"], self.env)
+        self.assertTrue(done["written"])                                   # .env is
+        self.assertEqual((done["profile"], done["profile_error"]), (None, "site-profile.yaml not saved (OSError)"))
+
+    def test_what_a_profile_cannot_do(self):
+        for profile, said in (("env:\n  BITS_GITHUB_TOKEN: x\n", "they are secrets"),
+                              ("facts: [\n", "not YAML (line"),
+                              ("site: x\n", "nothing else"),
+                              ("env: [a]\n", "are mappings"),
+                              ("facts:\n  site: x\n", "not facts"),
+                              ("env:\n  VM_RETENTION: true\n", "quote it"),
+                              ("env:\n  VM_NODES: '3'\n", "nor .env.example knows"),
+                              ("env:\n  BITS_HOOK_URL: https://a:b@h.example\n", "credential"),
+                              ("env:\n  COMPOSE_PROJECT_NAME: other\n", "steer docker compose"),
+                              ("env:\n  lower: x\n", "not settings' names"),
+                              ("env:\n  1: x\n", "not settings' names"),
+                              ("# from https://u:pw@h.example\nenv: {}\n", "credential on line 1"),
+                              ('env:\n  BITS_HOOK_URL: "https://a:b\\x40h.example"\n', "credential in BITS_HOOK_URL")):
+            with self.assertRaises(site_settings.Refused, msg=profile) as e:
+                site_settings.plan({"profile": profile}, self.env)
+            self.assertIn(said, str(e.exception), profile)
+            self.assertNotIn("ghp_", str(e.exception))
+        with self.assertRaises(site_settings.Refused) as e:
+            site_settings.plan({"profile": self.PROFILE, "set": {"VM_RETENTION": "1"}}, self.env)
+        self.assertIn("without other changes", str(e.exception))
 
     def test_a_derived_key_follows_the_facts_again(self):
         with open(self.env, "a") as f:

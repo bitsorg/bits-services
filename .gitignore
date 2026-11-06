@@ -31,3 +31,8 @@ config/
 
 # bits-admin's passkeys and encrypted passphrases (sudo make admin-install)
 /admin-data/
+
+# the site's profile, as bits-admin saves it, and its backups
+/site-profile.yaml
+/site-profile.yaml.bak-*
+/site-profile.yaml.new-*

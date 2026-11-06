@@ -37,6 +37,18 @@ def sensitive(value):
     return isinstance(value, str) and any(p.search(value) for p in SENSITIVE)
 
 
+class _ProfileLoader(yaml.SafeLoader):
+    """YAML for a site profile: only plain decimals are integers, so 0x1f, 012, 1:30 or
+    1.10 stay the text they were written as."""
+
+
+_ProfileLoader.yaml_implicit_resolvers = {
+    c: [(tag, rx) for tag, rx in resolvers if tag not in ("tag:yaml.org,2002:int", "tag:yaml.org,2002:float")]
+    for c, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()}
+_ProfileLoader.add_implicit_resolver("tag:yaml.org,2002:int", re.compile(r"^[-+]?(0|[1-9][0-9]*)$"),
+                                     list("-+0123456789"))
+
+
 class _Loader(yaml.SafeLoader):
     """Compose's own tags (!reset, !override) read as plain values."""
 
@@ -104,19 +116,28 @@ def example_docs(text):
 
 
 def _read(path):
+    """A file of the checkout as text, "" if there is none."""
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
         return ""
 
 
+def _env(path):
+    """.env or site-profile.yaml, which bits-admin writes: never through a link."""
+    try:
+        return site_profile.read_regular(path)[0] or ""
+    except ValueError as e:  # a link, a FIFO, too big: its name and the rule
+        raise Refused(str(e))
+
+
 COMPOSE, EXAMPLE = os.path.join(DIR, "docker-compose.yml"), os.path.join(DIR, ".env.example")
+PROFILE = os.path.join(DIR, "site-profile.yaml")
 
 
-def collect(env_path=site_profile.ENV_FILE, compose_path=COMPOSE, example_path=EXAMPLE,
-            profile_path=os.path.join(DIR, "site-profile.yaml")):
-    text = _read(env_path)
+def collect(env_path=site_profile.ENV_FILE, compose_path=COMPOSE, example_path=EXAMPLE, profile_path=PROFILE):
+    text = _env(env_path)
     env = site_profile.parse_env(text)
     withheld = sorted(k for k, v in env.items() if sensitive(v) and not site_profile.is_secret(k, v))
     clean = {k: v for k, v in env.items() if k not in withheld}  # what may leave the host
@@ -142,10 +163,9 @@ def collect(env_path=site_profile.ENV_FILE, compose_path=COMPOSE, example_path=E
                          "doc": (docs.get(key) or {}).get("doc", ""), "derived": derived.get(key)})
     answer = {"facts": profile["facts"], "settings": settings, "profile": profile, "withheld": withheld,
               "base": _base(text)}  # what plan() calls base
-    if os.path.exists(profile_path):
+    if os.path.lexists(profile_path):
         try:
-            with open(profile_path) as f:
-                diffs, notes = site_profile.compare(yaml.safe_load(f), clean)
+            diffs, notes = site_profile.compare(yaml.load(_env(profile_path), Loader=_ProfileLoader), clean)
             answer["profile_file"] = {"diffs": [d for d in diffs if not sensitive(d)], "notes": notes}
         except Exception as e:  # an empty or odd file: say which, nothing of it
             answer["profile_file"] = {"error": "site-profile.yaml: %s" % type(e).__name__}
@@ -183,25 +203,12 @@ def _changes(changes):
     for key in list(sets) + unsets + follows:
         if not isinstance(key, str) or not NAME.match(key):
             raise Refused("%r is not a setting's name" % (str(key)[:64],))
-        if NOT_HERE.match(key):
-            raise Refused("%s steers docker compose itself: change it by hand" % key)
     return facts, sets, unsets, follows
 
 
-def edited(text, changes, known=None):
-    """(the new .env text, [(key, old, new)]) after *changes*; secrets and withheld values
-    are kept as written and cannot be changed here (they are service secrets). A new key
-    must be one of *known* (what compose reads or .env.example names)."""
+def _from_changes(old, kept, changes, known):
+    """The plain .env keys after the Settings form's changes."""
     facts, sets, unsets, follows = _changes(changes)
-    try:
-        expanding = site_profile.unquoted_expansions(text)
-        old = site_profile.parse_env(text)
-    except ValueError as e:  # site_profile's own words: a key and a rule
-        raise Refused(".env: %s" % e)
-    if expanding:
-        raise Refused("compose would expand $ or \\ in %s: put the value in single quotes by hand first"
-                      % ", ".join(expanding))
-    kept = [k for k, v in old.items() if v and (site_profile.is_secret(k, v) or sensitive(v))]
     touched = [k for k in list(sets) + unsets + follows if k in kept or site_profile.is_secret(k, sets.get(k, ""))
                or sensitive(sets.get(k))] + [k for k, v in facts.items() if sensitive(v)]
     if touched:
@@ -216,14 +223,90 @@ def edited(text, changes, known=None):
         raise Refused("follow the facts, so cannot be unset: %s" % ", ".join(sorted(set(unsets) & set(derived_now))))
     if set(follows) - set(derived_then):
         raise Refused("follow no fact: %s" % ", ".join(sorted(set(follows) - set(derived_then))))
-    base = {k: v for k, v in old.items() if k not in kept and k not in unsets and k not in follows}
+    base = {k: v for k, v in visible.items() if k not in unsets and k not in follows}
     try:
         plain, _ = site_profile.setup_env(base, facts, sets, {})
-        plain = {k: v for k, v in plain.items() if k not in kept}  # a kept line wins, once
+    except ValueError as e:  # site_profile's own words: keys and rules
+        raise Refused(str(e))
+    return plain
+
+
+def _from_profile(old, text, known):
+    """The plain .env keys a site-profile.yaml implies: all of them, so a key it does not
+    name goes; secrets never come from it."""
+    if not isinstance(text, str) or len(text) > 32768:
+        raise Refused("site-profile.yaml: a text of at most 32 KB")
+    try:
+        profile = yaml.load(text, Loader=_ProfileLoader)
+    except yaml.YAMLError as e:
+        mark = getattr(e, "problem_mark", None)
+        raise Refused("site-profile.yaml is not YAML%s" % (" (line %d)" % (mark.line + 1) if mark else ""))
+    if not isinstance(profile, dict) or set(profile) - {"facts", "overrides", "env"}:
+        raise Refused("site-profile.yaml has facts:, overrides: and env:, nothing else")
+    parts = [{} if profile.get(k) is None else profile[k] for k in ("facts", "overrides", "env")]
+    if not all(isinstance(p, dict) for p in parts):
+        raise Refused("site-profile.yaml: facts:, overrides: and env: are mappings")
+    facts, named = parts[0], {**parts[1], **parts[2]}
+    if set(facts) - set(site_profile.FACTS):
+        raise Refused("not facts: %s" % ", ".join(sorted(str(k) for k in set(facts) - set(site_profile.FACTS))))
+    bad = [str(k)[:64] for k in named if not isinstance(k, str) or not NAME.match(k)]
+    if bad:
+        raise Refused("not settings' names: %s" % ", ".join(sorted(bad)))
+    secret = [k for k, v in named.items() if isinstance(v, (str, int)) and site_profile.is_secret(k, str(v))]
+    if secret:
+        raise Refused("not in a profile, they are secrets: %s" % ", ".join(sorted(secret)))
+    try:
+        plain = site_profile.derive_env(profile)
+        problems = site_profile.check(profile)
+    except ValueError as e:  # site_profile's own words: keys and rules
+        raise Refused("site-profile.yaml: %s" % e)
+    if problems:
+        raise Refused("site-profile.yaml: %s" % "; ".join(problems))
+    held = [i + 1 for i, line in enumerate(text.splitlines()) if sensitive(line)]
+    if held:  # it is saved as written, comments too
+        raise Refused("site-profile.yaml holds a credential on line %s" % ", ".join(map(str, held)))
+    held = [str(k) for k, v in list(facts.items()) + list(named.items()) if sensitive(str(v))]
+    if held:  # written in YAML escapes or folded
+        raise Refused("site-profile.yaml holds a credential in %s" % ", ".join(sorted(held)))
+    long = [k for k, v in plain.items() if len(v) > 4096 or not v.isprintable()]
+    if long:
+        raise Refused("%s: a text of at most 4096 characters, on one line" % ", ".join(long))
+    unknown = set(plain) - set(old) - set(site_profile.derive(facts)) - set(known if known is not None else plain)
+    if unknown:
+        raise Refused("neither docker-compose.yml nor .env.example knows %s" % ", ".join(sorted(unknown)))
+    return plain
+
+
+def edited(text, changes, known=None):
+    """(the new .env text, [(key, old, new)], notes) after *changes*: the Settings form's,
+    or {"profile": a site-profile.yaml's text}. Secrets and withheld values are kept as
+    written and cannot be changed here (they are service secrets). A new key must be one
+    of *known* (what compose reads or .env.example names)."""
+    try:
+        expanding = site_profile.unquoted_expansions(text)
+        old = site_profile.parse_env(text)
+    except ValueError as e:  # site_profile's own words: a key and a rule
+        raise Refused(".env: %s" % e)
+    if expanding:
+        raise Refused("compose would expand $ or \\ in %s: put the value in single quotes by hand first"
+                      % ", ".join(expanding))
+    kept = [k for k, v in old.items() if v and (site_profile.is_secret(k, v) or sensitive(v))]
+    notes = []
+    if _is_profile(changes):
+        if len(changes) != 1:
+            raise Refused("a site-profile.yaml comes without other changes")
+        plain = _from_profile(old, changes["profile"], known)
+        unnamed = [k for k in old if k not in plain and k not in kept
+                   and (site_profile.SECRET_NAME.search(k) or NOT_HERE.match(k))]
+        notes = ["%s: kept, as the profile does not name it (secrets and compose's own stay)" % k for k in unnamed]
+        kept += unnamed
+    else:
+        plain = _from_changes(old, kept, changes, known)
+    notes += ["%s: kept as written, as it holds a credential" % k for k in kept if k in plain]
+    plain = {k: v for k, v in plain.items() if k not in kept}  # a kept line wins, once
+    try:
         out = site_profile.render_env(plain, "# generated by bits-admin %s; change it there"
                                       % time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
-    except Refused:
-        raise
     except ValueError as e:
         raise Refused(str(e))
     if kept:  # as written, never re-quoted
@@ -233,10 +316,17 @@ def edited(text, changes, known=None):
     new = site_profile.parse_env(out)
     diff = [(k, old.get(k), new.get(k)) for k in sorted(set(old) | set(new))
             if old.get(k) != new.get(k)]
+    steering = [k for k, _, _ in diff if NOT_HERE.match(k)]
+    if steering:
+        raise Refused("%s: they steer docker compose itself, change them by hand" % ", ".join(steering))
     leaking = [k for k, _, v in diff if v and (site_profile.is_secret(k, v) or sensitive(v))]
     if leaking:  # a credential must not become a plain setting, nor show in the plan
         raise Refused("would write a credential into %s" % ", ".join(leaking))
-    return out, diff
+    return out, diff, notes
+
+
+def _is_profile(changes):
+    return isinstance(changes, dict) and "profile" in changes
 
 
 def _known(compose_path, example_path):
@@ -244,22 +334,33 @@ def _known(compose_path, example_path):
 
 
 def plan(changes, env_path=site_profile.ENV_FILE, compose_path=None, example_path=None):
-    """{base, diff}: what applying *changes* to .env would do; base names .env then."""
-    text = _read(env_path)
-    _, diff = edited(text, changes, _known(compose_path or COMPOSE, example_path or EXAMPLE))
-    return {"base": _base(text),
+    """{base, diff, notes}: what applying *changes* to .env would do; base names .env then."""
+    text = _env(env_path)
+    _, diff, notes = edited(text, changes, _known(compose_path or COMPOSE, example_path or EXAMPLE))
+    return {"base": _base(text), "notes": notes,
             "diff": [{"key": k, "old": o, "new": n} for k, o, n in diff]}
 
 
-def apply(changes, base, env_path=site_profile.ENV_FILE, compose_path=None, example_path=None):
-    """Writes .env as plan() showed, if it is still the .env of that plan."""
-    text = _read(env_path)
+def apply(changes, base, env_path=site_profile.ENV_FILE, compose_path=None, example_path=None,
+          profile_path=None):
+    """Writes .env as plan() showed, if it is still the .env of that plan; a profile's
+    text is kept as site-profile.yaml too."""
+    text = _env(env_path)
     if not hmac.compare_digest(_base(text), str(base)):
         raise Refused(".env changed since the plan: plan again")
-    out, diff = edited(text, changes, _known(compose_path or COMPOSE, example_path or EXAMPLE))
+    out, diff, _ = edited(text, changes, _known(compose_path or COMPOSE, example_path or EXAMPLE))
+    profile_path = profile_path or PROFILE
+    if _is_profile(changes):
+        _env(profile_path)  # what would stop it, before .env is written
     written, backup = site_profile.write_env(env_path, out)
-    return {"written": written, "backup": os.path.basename(backup) if backup else None,
-            "keys": [k for k, _, _ in diff]}
+    done = {"written": written, "backup": os.path.basename(backup) if backup else None,
+            "keys": [k for k, _, _ in diff], "profile": None, "profile_error": None}
+    if _is_profile(changes):
+        try:
+            done["profile"] = "site-profile.yaml" if site_profile.write_env(profile_path, changes["profile"])[0] else None
+        except (OSError, ValueError) as e:  # .env is written: say so rather than fail it all
+            done["profile_error"] = "site-profile.yaml not saved (%s)" % type(e).__name__
+    return done
 
 
 if __name__ == "__main__":
