@@ -8,6 +8,7 @@ bits-admin container's group can open; one JSON request per connection:
 
     {"op": "status"}
     {"op": "hosts"}       (tools/site_hosts.py: services, ports, networks, where they point)
+    {"op": "check"}       (probes each connection of hosts once: health URLs, TCP connects)
     {"op": "check-signer-passphrase", "passphrase": "..."}
     {"op": "unlock-signer", "passphrase": "..."}
     {"op": "push-secrets", "passphrase": "..."}
@@ -44,7 +45,7 @@ MAX_REQUEST = 4096
 TIMEOUT = 15
 FAILURES, WINDOW = 5, 600  # wrong passphrases allowed per window (seconds)
 HOSTS_TTL = 30  # seconds a hosts answer is reused
-OPS = ("status", "hosts", "check-signer-passphrase", "unlock-signer", "push-secrets")
+OPS = ("status", "hosts", "check", "check-signer-passphrase", "unlock-signer", "push-secrets")
 
 
 def log(text):
@@ -83,11 +84,12 @@ class Helper:
         self.ops = ops or {"health": compose_health, "signer": signer_state,
                            "hosts": lambda: dict(site_hosts.collect(unlocking._compose, compose_health()),
                                                  up=site_hosts.scrape_up()),
+                           "probe": site_hosts.check,
                            "check": lambda pw: unlocking.decrypt_signing_seed(unlocking.SIGN_KEY, pw),
                            "unlock": unlocking.unlock_signer,
                            "load": unlocking.load_service_secrets,
                            "push": unlocking.push_service_secrets}
-        self.now, self.failures, self.hosts = now, collections.deque(), None
+        self.now, self.failures, self.hosts, self.checked = now, collections.deque(), None, None
 
     def _locked_out(self):
         while self.failures and self.now() - self.failures[0] > WINDOW:
@@ -108,6 +110,15 @@ class Helper:
                 log("hosts failed: %s" % type(e).__name__)
                 return {"ok": False, "error": "docker compose config failed; see the helper's journal"}
             self.hosts = (self.now(), answer)
+            return answer
+        if op == "check":  # probes other hosts: at most one run per HOSTS_TTL
+            if self.checked and self.now() - self.checked[0] < HOSTS_TTL:
+                return self.checked[1]
+            hosts = self.handle({"op": "hosts"})
+            if not hosts.get("ok"):
+                return hosts
+            answer = {"ok": True, "at": time.time(), "results": self.ops["probe"](hosts)}
+            self.checked = (self.now(), answer)
             return answer
         if op not in OPS:
             return {"ok": False, "error": "unknown request"}
@@ -214,7 +225,7 @@ def _answer(conn, helper):
 
 def ask(op, path=SOCKET):
     request = {"op": op}
-    if op not in ("status", "hosts"):
+    if op not in ("status", "hosts", "check"):
         request["passphrase"] = getpass.getpass("Passphrase: ")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
         c.settimeout(120)

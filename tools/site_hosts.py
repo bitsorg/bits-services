@@ -7,12 +7,16 @@ monitoring scrapes. Only names, hosts and ports: never a value of a secret.
     tools/site_hosts.py          # the JSON the host helper hands bits-admin
 """
 
+import concurrent.futures
 import json
 import math
 import os
 import re
 import socket
+import ssl
 import sys
+import time
+import urllib.error
 import urllib.request
 from urllib.parse import urlencode, urlsplit
 
@@ -111,6 +115,88 @@ def scrape_up(get=_get):
     except (OSError, ValueError, KeyError, TypeError, IndexError, ArithmeticError) as e:
         return {"error": "VictoriaMetrics did not answer (%s)" % type(e).__name__}
     return {"targets": sorted(targets, key=lambda t: (t["job"], t["instance"]))}
+
+
+HEALTH_PATHS = {"PREPUB": "/api/v1/health", "OIDC_ISSUER": "/.well-known/openid-configuration"}
+LOCAL_NAMES = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
+MAX_PROBES = 50
+SAID = {"gaierror": "name not found", "ConnectionRefusedError": "refused", "TimeoutError": "no answer in 3 s",
+        "ConnectionResetError": "reset", "SSLError": "TLS failed", "SSLCertVerificationError": "TLS certificate refused"}
+
+
+def _tcp(host, port, timeout=3):
+    with socket.create_connection((host, int(port)), timeout=timeout):
+        return "connects"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None  # a 3xx is the answer: the probe never goes elsewhere
+
+
+def _http(url, timeout=3, verify=True):
+    ctx = None if verify else ssl._create_unverified_context()  # the backend's own cert, on localhost
+    opener = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=ctx))
+    try:
+        with opener.open(url, timeout=timeout) as r:
+            return "HTTP %d" % r.status
+    except urllib.error.HTTPError as e:
+        raise OSError("HTTP %d" % e.code)
+    except urllib.error.URLError as e:  # what is underneath: refused, a timeout, DNS
+        raise e.reason if isinstance(e.reason, OSError) else OSError(type(e.reason).__name__)
+
+
+def probes(hosts):
+    """[(target, what, call)] for a hosts answer: the backend's /healthz, a health URL for
+    the services that have one, a TCP connect for every other host and port."""
+    out, seen = [], set()
+    for name, s in (hosts.get("services") or {}).items():
+        for p in s.get("ports") or []:
+            if name == "bits-console-backend" and str(p.get("target")) == "8443" and p.get("published"):
+                url = "https://127.0.0.1:%s/healthz" % p["published"]
+                out.append(("127.0.0.1:%s" % p["published"], "GET /healthz", lambda u=url: _http(u, verify=False)))
+    here = set(LOCAL_NAMES) | {str(hosts.get("host", "")).lower()} | set(hosts.get("services") or {})
+    ends = [(l["host"], l["port"], l.get("scheme", "https"), l.get("key", "")) for l in hosts.get("links") or []]
+    ends += [(t["host"], t["port"], "http", "") for t in hosts.get("scrape") or []]
+    for host, port, scheme, key in ends:
+        if host in here or (host, port) in seen:
+            continue
+        seen.add((host, port))
+        path = next((p for k, p in HEALTH_PATHS.items() if k in key), None)
+        target = "%s:%s" % (host, port)
+        if path and scheme in ("http", "https"):
+            url = "%s://%s%s" % (scheme, target, path)
+            out.append((target, "GET " + path, lambda u=url: _http(u)))
+        else:
+            out.append((target, "TCP connect", lambda h=host, p=port: _tcp(h, p)))
+    return out[:MAX_PROBES]
+
+
+def check(hosts, workers=16, deadline=8):
+    """[{target, probe, ok, said, ms}], all probes at once and within *deadline* seconds
+    (a slow name lookup included); *said* names the outcome only."""
+    def run(item):
+        target, what, call = item
+        start = time.monotonic()
+        try:
+            said, ok = call(), True
+        except socket.timeout:
+            said, ok = "no answer in 3 s", False
+        except OSError as e:
+            said = str(e) if str(e).startswith("HTTP ") else SAID.get(type(e).__name__, type(e).__name__)
+            ok = False
+        except Exception as e:  # a bad port or name: that probe fails, not the check
+            said, ok = type(e).__name__, False
+        return {"target": target, "probe": what, "ok": ok, "said": said,
+                "ms": int((time.monotonic() - start) * 1000)}
+    items = probes(hosts)
+    pool = concurrent.futures.ThreadPoolExecutor(workers)
+    futures = [pool.submit(run, item) for item in items]
+    concurrent.futures.wait(futures, timeout=deadline)
+    pool.shutdown(wait=False, cancel_futures=True)
+    return [f.result() if f.done() and not f.cancelled() else
+            {"target": t, "probe": w, "ok": False, "said": "no answer in %d s" % deadline, "ms": None}
+            for f, (t, w, _) in zip(futures, items)]
 
 
 def collect(compose, states, scrape_path=os.path.join(DIR, "monitoring", "scrape.yml"), host=None):

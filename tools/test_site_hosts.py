@@ -3,6 +3,7 @@
 
 import json
 import os
+import socket
 import sys
 import tempfile
 import unittest
@@ -28,6 +29,8 @@ CONFIG = {
         "victoriametrics": {"image": "victoriametrics/victoria-metrics:v1.99.0",
                             "ports": [{"host_ip": "127.0.0.1", "target": 8428, "published": "8428"}],
                             "networks": {"monitoring-net": None}},
+        "audit-log": {"image": "bits-services/audit-log:local", "networks": {"audit-net": None}},
+        "node-exporter": {"image": "prom/node-exporter", "networks": {"monitoring-net": None}},
         "bits-admin": {"image": "bits-services/bits-console-backend:local", "profiles": ["admin"],
                        "networks": {"admin-audit-net": None},
                        "environment": {"BITS_ADMIN_AUDIT_URL": "http://audit-log:8443"}},
@@ -118,6 +121,64 @@ class SiteHostsTest(unittest.TestCase):
         self.assertEqual(site_hosts.scrape_up(lambda url: (_ for _ in ()).throw(OSError("refused"))),
                          {"error": "VictoriaMetrics did not answer (OSError)"})
         self.assertIn("error", site_hosts.scrape_up(lambda url: b"<html>"))
+
+    def test_what_check_probes(self):
+        hosts, _ = self.collect()
+        hosts["links"].append({"service": "x", "key": "BITS_OIDC_ISSUER", "scheme": "https",
+                               "host": "gitlab.cern.ch", "port": 443})
+        got = [(t, w) for t, w, _ in site_hosts.probes(hosts)]
+        self.assertEqual(got, [
+            ("127.0.0.1:8443", "GET /healthz"),
+            ("cvmfs-bits-01.cern.ch:8080", "GET /api/v1/health"),   # a prepub node
+            ("bits-build-01.cern.ch:8080", "GET /api/v1/health"),
+            ("gitlab.cern.ch:443", "TCP connect"),                   # the first link to it decides
+        ])                                  # audit-log, node-exporter: services here, not probed
+
+    def test_check_says_only_the_outcome(self):
+        hosts, _ = self.collect()
+        real_tcp, real_http = site_hosts._tcp, site_hosts._http
+        def http(url, **kw):
+            if "cvmfs-bits-01" in url:
+                raise OSError("HTTP 503")
+            if "bits-build-01" in url:
+                raise ConnectionRefusedError("[Errno 111] secret detail")
+            return "HTTP 200"
+        site_hosts._http = http
+        site_hosts._tcp = lambda h, p, timeout=3: (_ for _ in ()).throw(socket.timeout())
+        try:
+            results = {r["target"]: (r["ok"], r["said"]) for r in site_hosts.check(hosts)}
+        finally:
+            site_hosts._tcp, site_hosts._http = real_tcp, real_http
+        self.assertEqual(results, {"127.0.0.1:8443": (True, "HTTP 200"),
+                                   "cvmfs-bits-01.cern.ch:8080": (False, "HTTP 503"),
+                                   "bits-build-01.cern.ch:8080": (False, "refused"),
+                                   "gitlab.cern.ch:443": (False, "no answer in 3 s")})
+
+    def test_check_keeps_to_its_deadline_and_survives_odd_targets(self):
+        import threading
+        release = threading.Event()
+        hosts = {"host": "bits", "services": {}, "links": [
+            {"host": "slow.example", "port": 1, "key": ""}, {"host": "odd.example", "port": "${PORT}", "key": ""}]}
+        real = site_hosts._tcp
+        site_hosts._tcp = lambda h, p, timeout=3: release.wait(5) if h == "slow.example" else real(h, p)
+        try:
+            got = {r["target"]: r["said"] for r in site_hosts.check(hosts, deadline=0.5)}
+        finally:
+            release.set()
+            site_hosts._tcp = real
+        self.assertEqual(got, {"slow.example:1": "no answer in 0 s", "odd.example:${PORT}": "ValueError"})
+
+    def test_a_redirect_is_the_answer(self):
+        import http.server
+        import threading
+        srv = http.server.HTTPServer(("127.0.0.1", 0), type("H", (http.server.BaseHTTPRequestHandler,), {
+            "do_GET": lambda s: (s.send_response(302), s.send_header("Location", "http://127.0.0.1:1/x"),
+                                 s.end_headers()), "log_message": lambda *a: None}))
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.shutdown)
+        with self.assertRaises(OSError) as e:
+            site_hosts._http("http://127.0.0.1:%d/api/v1/health" % srv.server_address[1])
+        self.assertEqual(str(e.exception), "HTTP 302")
 
     def test_a_failing_config_is_an_error(self):
         with self.assertRaises(ValueError):

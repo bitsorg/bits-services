@@ -78,6 +78,26 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(answer["ok"], False)
         self.assertNotIn("s3cr3t", json.dumps(answer))
 
+    def test_check_runs_at_most_once_a_while(self):
+        runs = []
+        h = helper.Helper(dict(self.fakes.ops(), hosts=lambda: {"host": "bits"},
+                               probe=lambda hosts: runs.append(hosts["host"]) or [{"target": "a:1", "ok": True}]),
+                          now=lambda: self.t[0])
+        answer = h.handle({"op": "check"})
+        self.assertEqual(answer["results"], [{"target": "a:1", "ok": True}])
+        self.assertIn("at", answer)
+        h.handle({"op": "check"})
+        self.assertEqual(runs, ["bits"])
+        self.t[0] += helper.HOSTS_TTL + 1
+        h.handle({"op": "check"})
+        self.assertEqual(runs, ["bits", "bits"])
+        real = helper.Helper().ops  # its probe is not the passphrase check
+        self.assertIs(real["probe"], helper.site_hosts.check)
+        self.assertIsNot(real["check"], real["probe"])
+        failing = helper.Helper(dict(self.fakes.ops(), hosts=lambda: (_ for _ in ()).throw(ValueError("x"))))
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(failing.handle({"op": "check"})["ok"], False)
+
     def test_check_the_passphrase(self):
         check = lambda pw: self.h.handle({"op": "check-signer-passphrase", "passphrase": pw})
         self.assertEqual(check("right-pass-9"), {"ok": True})
