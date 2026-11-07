@@ -112,7 +112,8 @@ try:
     import requests
     api, auth = credproxy.github(s)                 # /rate_limit costs nothing
     r = requests.get(api + "/rate_limit", headers={"Authorization": auth} if auth else {}, timeout=20)
-    out["github" + (" (through the proxy)" if not api.startswith("https://api.github.com") else "")] = (
+    straight = api.startswith("https://api.github.com")  # the proxy has no github-read route
+    out["github (straight: the proxy has no github-read route)" if straight else "github (through the proxy)"] = (
         "ok, %s/hr" % r.json()["resources"]["core"]["limit"] if r.status_code == 200 else r.status_code)
 except Exception as e:
     out["github"] = "%s: %s" % (type(e).__name__, e)
