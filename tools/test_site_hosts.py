@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 import urllib.parse
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import site_hosts  # noqa: E402
@@ -112,7 +113,7 @@ class SiteHostsTest(unittest.TestCase):
         self.assertEqual(site_hosts.scrape_up(get), {"targets": [
             {"job": "prepub", "instance": "bits-build-01.cern.ch:8080", "up": 0, "last_up": 1762000000.0},
             {"job": "prepub", "instance": "cvmfs-bits-01.cern.ch:8080", "up": 1, "last_up": None}]})
-        self.assertEqual(asked[0], site_hosts.VM_URL + "/api/v1/query?query=up")
+        self.assertEqual(asked[0], site_hosts.vm_url() + "/api/v1/query?query=up")
         answers["up"].append({"metric": {"job": "x", "instance": "y"}, "value": [1, "NaN"]})
         answers["last_over_time(timestamp(up == 1)[1d])"][0]["value"] = [1, "+Inf"]
         got = site_hosts.scrape_up(get)["targets"]
@@ -190,6 +191,23 @@ class SiteHostsTest(unittest.TestCase):
         with self.assertRaises(ValueError):  # without --profiles, profiled services would vanish
             site_hosts.collect(lambda args: (1, "", "") if args == ["config", "--profiles"]
                                else (0, json.dumps(CONFIG), ""), {}, "/nonexistent")
+
+
+
+class VmUrlTest(unittest.TestCase):
+    def test_the_port_dot_env_publishes(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("BITS_ADMIN_HELPER_VM_URL", None)
+            env = os.path.join(d, ".env")
+            self.assertEqual(site_hosts.vm_url(env), "http://127.0.0.1:8428")       # no .env
+            with open(env, "w") as f:
+                f.write("VM_HOST_PORT='18428'\n")
+            self.assertEqual(site_hosts.vm_url(env), "http://127.0.0.1:18428")
+            with open(env, "w") as f:
+                f.write("VM_HOST_PORT=x\n")
+            self.assertEqual(site_hosts.vm_url(env), "http://127.0.0.1:8428")       # not a port
+            os.environ["BITS_ADMIN_HELPER_VM_URL"] = "http://vm.example:9"
+            self.assertEqual(site_hosts.vm_url(env), "http://vm.example:9")
 
 
 if __name__ == "__main__":

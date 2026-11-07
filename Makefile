@@ -86,7 +86,8 @@ monitoring:  ## Start/refresh only the monitoring stack (signer + backend untouc
 	$(COMPOSE) up -d $(MON_SERVICES)
 
 monitoring-check:  ## Scrape targets and whether each is up (1) or down (0)
-	@curl -s -G http://localhost:8428/api/v1/query --data-urlencode 'query=up' | \
+	@port=$$(sed -n "s/^\(export \)\{0,1\}VM_HOST_PORT=['\"]*\([0-9]*\).*/\2/p" .env 2>/dev/null | tail -1); \
+	curl -s -G http://localhost:$${port:-8428}/api/v1/query --data-urlencode 'query=up' | \
 	  python3 -c 'import sys,json; [print("%s  %-14s %-10s %s" % (r["value"][1], r["metric"].get("job",""), r["metric"].get("role",""), r["metric"].get("instance",""))) for r in sorted(json.load(sys.stdin)["data"]["result"], key=lambda r: r["metric"].get("job",""))]'
 
 clean:  ## Stop services and remove containers + volumes (keeps .env and monitoring data)

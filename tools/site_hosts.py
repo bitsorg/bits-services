@@ -23,10 +23,10 @@ from urllib.parse import urlencode, urlsplit
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from site_profile import SECRET_NAME  # noqa: E402
+from site_profile import SECRET_NAME, parse_env  # noqa: E402
 
 DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VM_URL = os.environ.get("BITS_ADMIN_HELPER_VM_URL", "http://127.0.0.1:8428")  # VictoriaMetrics, on the host
+ENV_FILE = os.path.join(DIR, ".env")
 URL = re.compile(r"^(https?|s3|b3)://", re.I)
 PORTS = {"http": 80, "https": 443, "s3": 443, "b3": 443}
 
@@ -88,8 +88,21 @@ def scrape_view(text):
     return out
 
 
+def vm_url(env_path=ENV_FILE):
+    """VictoriaMetrics on the host: BITS_ADMIN_HELPER_VM_URL, else the port .env
+    publishes it on (VM_HOST_PORT, 8428 by default)."""
+    if os.environ.get("BITS_ADMIN_HELPER_VM_URL"):
+        return os.environ["BITS_ADMIN_HELPER_VM_URL"]
+    try:
+        with open(env_path) as f:
+            port = parse_env(f.read()).get("VM_HOST_PORT", "")
+    except (OSError, ValueError):
+        port = ""
+    return "http://127.0.0.1:%s" % (port if port.isdigit() else "8428")
+
+
 def _query(expr, get):
-    data = get("%s/api/v1/query?%s" % (VM_URL, urlencode({"query": expr})))
+    data = get("%s/api/v1/query?%s" % (vm_url(), urlencode({"query": expr})))
     return json.loads(data)["data"]["result"]
 
 
