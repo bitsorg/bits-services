@@ -12,7 +12,8 @@ never see them: the proxy adds them to requests on the way out.
     tools/service-secrets.py remove <slot>
     tools/service-secrets.py list           # slot names only
     tools/service-secrets.py import-env     # take the ones still in .env (once)
-    tools/service-secrets.py push           # into the running proxy (make unlock)
+    tools/service-secrets.py push           # into the running proxy
+    tools/service-secrets.py push --if-running   # make unlock's: skipped, said, if it is not
     tools/service-secrets.py check          # through the proxy, from the services
 
 Each prompts for the passphrase. Slots (see security-proxy/credentials.sample.json):
@@ -141,7 +142,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("command", choices=["set", "remove", "list", "import-env", "push", "check"])
     ap.add_argument("slot", nargs="?")
+    ap.add_argument("--if-running", action="store_true",
+                    help="push: say so and do nothing when the credentials proxy is not running")
     a = ap.parse_args()
+    if a.command == "push" and a.if_running and not unlocking.running(unlocking.CRED_PROXY):
+        print(">> service secrets not pushed: %s is not running (docker compose --profile credentials"
+              " up -d %s, then make unlock)" % (unlocking.CRED_PROXY, unlocking.CRED_PROXY))
+        return
     if a.command == "check":
         r = subprocess.run(["docker", "compose", "exec", "-T", "-e",
                             "BITS_CRED_PROXY_AGENT_SOCKET=/run/credentials-proxy/agent.sock",

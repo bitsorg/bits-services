@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for unlocking.py and service-secrets.py's use of it (docker compose faked)."""
 
+import contextlib
 import importlib.util
+import io
 import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import unlocking as ul  # noqa: E402
@@ -112,6 +115,22 @@ class UnlockingTest(unittest.TestCase):
         ul.push_service_secrets({"github-read": "Bearer ghp_x"})               # stored with it: once
         pushed = [i for a, i in self.fake.calls if "push" in a and a[a.index("push") + 1] == "github-read"]
         self.assertEqual(pushed[-1], "Bearer ghp_x")
+
+    def test_push_if_running_skips_a_stopped_proxy(self):
+        self.fake.running = ()
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["service-secrets.py", "push", "--if-running"]), \
+                mock.patch.object(ss, "passphrase", lambda new=False: self.fail("asked for the passphrase")), \
+                contextlib.redirect_stdout(out):
+            ss.main()
+        self.assertIn("not pushed: credentials-proxy is not running", out.getvalue())
+        self.assertFalse([a for a, _ in self.fake.calls if "push" in a])
+        self.fake.running = ("credentials-proxy",)                             # running: it goes on
+        with mock.patch.object(sys, "argv", ["service-secrets.py", "push", "--if-running"]), \
+                mock.patch.object(ss, "passphrase", mock.Mock(side_effect=KeyboardInterrupt)) as asked:
+            with self.assertRaises(KeyboardInterrupt):
+                ss.main()
+        asked.assert_called_once()
 
     def test_writer_configured_but_down(self):
         real = ul._writer_configured

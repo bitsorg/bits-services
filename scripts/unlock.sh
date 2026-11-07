@@ -30,7 +30,7 @@ fi
 
 # 3. The service secrets into the credentials proxy (M6), when there are any.
 if [[ -f "$DIR/secrets/service-secrets.enc" ]]; then
-  python3 "$DIR/tools/service-secrets.py" push
+  python3 "$DIR/tools/service-secrets.py" push --if-running
 fi
 
 # 4. End-to-end check through the backend.
