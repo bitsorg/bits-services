@@ -242,6 +242,9 @@ services:
       # secrets are pushed and checked; then BITS_FORGE_OPS_TOKEN and
       # BITS_ADMIN_RESOLVE_TOKEN can go. Empty = the tokens above, as before.
       BITS_CRED_PROXY_AGENT_SOCKET: "${BITS_CRED_PROXY_AGENT_SOCKET:-}"
+      # Read tokens (bits console-backend README): what scripts and agents read
+      # failures, builds and the chat's records with. Empty = none accepted.
+      BITS_READ_TOKEN_KEY: "${BITS_READ_TOKEN_KEY:-}"
       # The help chat: Ollama on this host (http://host.docker.internal:11434).
       # Empty = no chat. Set with the worker's, which keeps its docs index.
       BITS_CHAT_URL: "${BITS_CHAT_URL:-}"

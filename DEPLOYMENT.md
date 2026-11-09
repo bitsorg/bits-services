@@ -423,3 +423,16 @@ Nothing of a chat is kept but votes (90 days, `GET /ops/chat/feedback` for
 overall admins). Turning it off: `BITS_CHAT_URL=` and `docker compose up -d
 bits-orchestrator bits-console-backend`; the Ask page then says the chat is not
 set up.
+
+## Read tokens
+
+Scripts and agents read build failures, builds and the help chat's records (its votes and
+the questions the docs did not answer) with a read token instead of a GitLab token (bits
+console-backend README, "Read tokens"): GET of those routes only, and a community's token
+only that community's.
+
+1. `openssl rand -hex 32`, into `.env` as `BITS_READ_TOKEN_KEY=` (`chmod 600 .env`).
+2. `docker compose up -d bits-orchestrator`, then `docker compose up -d bits-console-backend`:
+   the worker adds the tables (the chat's unanswered questions and the tokens, migrations
+   28 and 29), and until it has, the backend's orchestrator routes answer 503.
+3. A new key voids every token issued.
