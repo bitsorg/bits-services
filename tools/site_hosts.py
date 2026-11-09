@@ -29,6 +29,7 @@ DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_FILE = os.path.join(DIR, ".env")
 URL = re.compile(r"^(https?|s3|b3)://", re.I)
 PORTS = {"http": 80, "https": 443, "s3": 443, "b3": 443}
+S3_DEFAULT = "https://s3.cern.ch"  # the services' own, when neither endpoint setting is set
 
 
 def _endpoint(text):
@@ -64,14 +65,22 @@ def links_view(config):
     out = []
     for name, s in sorted((config.get("services") or {}).items()):
         env = s.get("environment") or {}
-        for key, value in sorted(env.items() if isinstance(env, dict) else []):
+        env = env if isinstance(env, dict) else {}
+        # s3:// and b3:// name a bucket, not a host: such a link is to the S3 endpoint
+        store = _endpoint(env.get("BITS_ORCH_S3_ENDPOINT") or env.get("BITS_S3_ENDPOINT_URL") or S3_DEFAULT)
+        for key, value in sorted(env.items()):
             # "@": user and password, which a "/" or "," in them would make look like a host
             if SECRET_NAME.search(key) or not isinstance(value, str) or "@" in value:
                 continue
             for part in value.split(","):
-                end = _endpoint(part.strip())
-                if end:
-                    out.append(dict(end, service=name, key=key))
+                part = part.strip()
+                if re.match(r"(s3|b3)://", part, re.I):
+                    end = store if _endpoint(part.split("::")[0]) else None   # b3://<bucket>::rw
+                else:
+                    end = _endpoint(part)
+                link = end and dict(end, service=name, key=key)
+                if link and link not in out:
+                    out.append(link)
     return out
 
 

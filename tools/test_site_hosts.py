@@ -91,6 +91,24 @@ class SiteHostsTest(unittest.TestCase):
                        "s3cr3t", "mirror.example", "chat.example"):
             self.assertNotIn(secret, text)
 
+    def test_a_store_is_a_link_to_its_s3_endpoint(self):
+        config = {"services": {
+            "bits-orchestrator": {"environment": {"BITS_ORCH_STORE": "b3://lcgapp-bits-testing",
+                                                  "BITS_ORCH_S3_ENDPOINT": ""}},
+            "worker": {"environment": {"BITS_ORCH_STORE": "b3://bucket::rw,b3://other/x::rw",
+                                       "BITS_S3_ENDPOINT_URL": "https://s3.example.org:9000"}},
+            "both": {"environment": {"BITS_ORCH_STORE": "s3://b", "BITS_ORCH_S3_ENDPOINT": "https://first:1",
+                                     "BITS_S3_ENDPOINT_URL": "https://second:2", "METRICS": "http://[::1]:9090"}}}}
+        links = {(l["service"], l["key"], l["host"], l["port"]) for l in site_hosts.links_view(config)}
+        self.assertEqual(links, {
+            ("bits-orchestrator", "BITS_ORCH_STORE", "s3.cern.ch", 443),
+            ("worker", "BITS_ORCH_STORE", "s3.example.org", 9000),
+            ("worker", "BITS_S3_ENDPOINT_URL", "s3.example.org", 9000),
+            ("both", "BITS_ORCH_STORE", "first", 1), ("both", "BITS_ORCH_S3_ENDPOINT", "first", 1),
+            ("both", "BITS_S3_ENDPOINT_URL", "second", 2), ("both", "METRICS", "::1", 9090)})
+        stores = [l for l in site_hosts.links_view(config) if l["key"] == "BITS_ORCH_STORE"]
+        self.assertEqual(len(stores), 3)   # the worker's two buckets: one link
+
     def test_scrape_targets(self):
         got, _ = self.collect()
         self.assertEqual(got["scrape"], [
