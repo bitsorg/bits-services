@@ -6,7 +6,7 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help init config build audit-token up down ps status logs unlock secret credentials-check helper-unit helper-install admin-install admin-up admin-code admin-reset test clean monitoring monitoring-check
+.PHONY: help init config build audit-token up down ps status logs unlock secret credentials-check helper-unit helper-install admin-install admin-up admin-code admin-reset store-up test clean monitoring monitoring-check
 
 # The monitoring stack (Phase 4), started on its own by `make monitoring`.
 MON_SERVICES := victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
@@ -78,6 +78,9 @@ admin-reset:  ## As root, all keys lost: restart bits-admin with a setup code va
 	@COMPOSE="$(COMPOSE)" bash scripts/admin-up.sh
 	@test ! -e /run/bits-admin/reset || { rm -f /run/bits-admin/reset; echo "bits-admin did not take the reset" >&2; exit 1; }
 	@echo "the setup code works for 30 minutes: make admin-code"
+
+store-up:  ## Build and start bits-store (DEPLOYMENT.md, "The store service") and wait until healthy
+	$(COMPOSE) --profile bits-store up -d --build --wait bits-store
 
 test:  ## Functional wiring check (proxy up, backend https/healthz, backend→proxy)
 	bash scripts/functional-test.sh

@@ -424,6 +424,26 @@ overall admins). Turning it off: `BITS_CHAT_URL=` and `docker compose up -d
 bits-orchestrator bits-console-backend`; the Ask page then says the chat is not
 set up.
 
+## The store service
+
+bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
+and write the store's volumes through short-lived presigned URLs, so no client holds
+storage keys. It runs from a bits-store checkout, off unless started:
+
+    git clone https://github.com/bitsorg/bits-store ../bits-store
+    install -d -m 0700 config/bits-store
+    # config/bits-store/config.json: see bits-store's config.example.json; the
+    # test instance's is made by scripts/bits-store/test-instance.py setup DIR
+    # set BITS_STORE_S3_ACCESS_KEY / BITS_STORE_S3_SECRET_KEY in .env
+    make store-up
+    curl -s http://127.0.0.1:8098/health
+
+It listens on 127.0.0.1:8098 (`BITS_STORE_PORT`), on a network of its own that reaches
+its volumes; the reverse proxy in front comes with the first users outside this host.
+The configuration's `listen` is overridden: the container always listens on :8098.
+The service runs as uid 65532, so `config.json` must be readable by others (`chmod
+644`; it holds no secret: the keys are in `.env`, the token seed stays out of it).
+
 ## Read tokens
 
 Scripts and agents read build failures, builds and the help chat's records (its votes and

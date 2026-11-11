@@ -415,6 +415,37 @@ services:
       retries: 3
       start_period: 60s
 
+  # bits-store (ADR bits-services 0004): the site's store service. Built from
+  # BITS_STORE_SRC (a bits-store checkout); off unless asked: make store-up. Its
+  # configuration names the environment variables holding its volumes' S3 keys.
+  bits-store:
+    build:
+      context: ${BITS_STORE_SRC:-../bits-store}
+    image: bits-services/bits-store:${BITS_IMAGE_TAG:-local}
+    profiles:
+      - bits-store
+    command: ["-config", "/etc/bits-store/config.json", "-listen", ":8098"]
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      BITS_STORE_S3_ACCESS_KEY: "${BITS_STORE_S3_ACCESS_KEY:-}"
+      BITS_STORE_S3_SECRET_KEY: "${BITS_STORE_S3_SECRET_KEY:-}"
+    volumes:
+      - type: bind                # never created by Docker (a root-owned directory)
+        source: ${BITS_STORE_CONFIG:-./config/bits-store/config.json}
+        target: /etc/bits-store/config.json
+        read_only: true
+        bind:
+          create_host_path: false
+    ports:
+      - "127.0.0.1:${BITS_STORE_PORT:-8098}:8098"
+    networks:
+      - bits-store-net
+
   # bits-admin (ADR bits-services 0001): the site's admin page, on a unix socket that
   # admins reach through an SSH tunnel; its only network reaches audit-log. Off unless
   # asked: make admin-up (after sudo make admin-install).
@@ -655,6 +686,9 @@ networks:
   # The worker <-> the sbom-scanner, which downloads its database from here
   # (not internal). Nothing else is on it.
   scan-net:
+    driver: bridge
+  # bits-store <-> its volumes (not internal: S3 is outside). Nothing else is on it.
+  bits-store-net:
     driver: bridge
   # The worker (and vmagent) <-> audit-log. Internal: no way in or out.
   audit-net:
