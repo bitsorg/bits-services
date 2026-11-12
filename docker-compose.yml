@@ -477,13 +477,16 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    environment:
-      BITS_STORE_S3_ACCESS_KEY: "${BITS_STORE_S3_ACCESS_KEY:-}"
-      BITS_STORE_S3_SECRET_KEY: "${BITS_STORE_S3_SECRET_KEY:-}"
+    # The S3 keys its volumes name, one pair per volume (bits-admin writes them).
+    env_file:
+      - path: ./secrets/bits-store.env
+        required: false
     volumes:
+      # The directory, not the file: a mounted file misses one replaced by rename,
+      # and bits-store reloads config.json when it changes.
       - type: bind                # never created by Docker (a root-owned directory)
-        source: ${BITS_STORE_CONFIG:-./config/bits-store/config.json}
-        target: /etc/bits-store/config.json
+        source: ${BITS_STORE_CONFIG_DIR:-./config/bits-store}
+        target: /etc/bits-store
         read_only: true
         bind:
           create_host_path: false

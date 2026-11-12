@@ -431,10 +431,10 @@ and write the store's volumes through short-lived presigned URLs, so no client h
 storage keys. It runs from a bits-store checkout, off unless started:
 
     git clone https://github.com/bitsorg/bits-store ../bits-store
-    install -d -m 0700 config/bits-store
+    install -d -m 0755 config/bits-store
     # config/bits-store/config.json: see bits-store's config.example.json; the
     # test instance's is made by scripts/bits-store/test-instance.py setup DIR
-    # set BITS_STORE_S3_ACCESS_KEY / BITS_STORE_S3_SECRET_KEY in .env
+    # the S3 keys its volumes name, as NAME=value lines, in secrets/bits-store.env (600)
     make store-up
     curl -s http://127.0.0.1:8098/health
 
@@ -442,7 +442,14 @@ It listens on 127.0.0.1:8098 (`BITS_STORE_PORT`), on a network of its own that r
 its volumes; the reverse proxy in front comes with the first users outside this host.
 The configuration's `listen` is overridden: the container always listens on :8098.
 The service runs as uid 65532, so `config.json` must be readable by others (`chmod
-644`; it holds no secret: the keys are in `.env`, the token seed stays out of it).
+644`; it holds no secret: the keys are in `secrets/bits-store.env`). It reloads
+`config.json` when the file changes (a configuration it refuses is logged, the
+running one kept); new keys need `make store-up`. Moving from an older setup: the
+`BITS_STORE_S3_*` lines go from `.env` into `secrets/bits-store.env`, and
+`BITS_STORE_CONFIG` (the file) becomes `BITS_STORE_CONFIG_DIR` (its directory, which
+the store must enter: `chmod 755 config/bits-store`). Compose 2.24 or newer reads the
+optional key file. bits-admin rewrites `secrets/bits-store.env` (`NAME='value'`), its
+keys named `BITS_STORE_...` by the volumes.
 
 ## Store tokens
 
