@@ -84,10 +84,26 @@ class UnlockingTest(unittest.TestCase):
         raw = Ed25519PrivateKey.from_private_bytes(seed).public_key().public_bytes(
             s.Encoding.Raw, s.PublicFormat.Raw)
         self.assertEqual(base64.urlsafe_b64decode(pub + "="), raw)
-        ul.unlock_signer(b"test-pass", path, store)                     # pushed with the signing key
-        pushed = {a[a.index("push") + 1]: v for a, v in self.fake.calls if "push" in a}
-        self.assertEqual(list(pushed), ["bits-sign-key", "bits-store-token-key"])
-        self.assertEqual(pushed["bits-store-token-key"], base64.b64encode(seed).decode())
+        said, _ = ul.unlock_signer(b"test-pass", path, store)           # its proxy is not running
+        self.assertIn("bits-store-token-key not pushed: store-token-signer is not running", said)
+        self.assertEqual([a[a.index("push") + 1] for a, _ in self.fake.calls if "push" in a],
+                         ["bits-sign-key"])
+        real_push = ul.push
+
+        def refusing(slot, value, service):                             # a failed push only reports
+            if service == "store-token-signer":
+                raise ul.UnlockError("refused")
+            return real_push(slot, value, service)
+        with mock.patch.object(ul, "push", refusing):
+            self.fake.running = ("store-token-signer",)
+            said, _ = ul.unlock_signer(b"test-pass", path, store)
+        self.assertIn("bits-store-token-key not pushed: refused", said)
+        self.fake.running, self.fake.calls[:] = ("store-token-signer",), []
+        ul.unlock_signer(b"test-pass", path, store)                     # into its own proxy
+        pushed = {a[a.index("push") + 1]: (a[2], v) for a, v in self.fake.calls if "push" in a}
+        self.assertEqual(pushed, {"bits-sign-key": ("security-proxy", mock.ANY),
+                                  "bits-store-token-key": ("store-token-signer",
+                                                           base64.b64encode(seed).decode())})
         with open(store, "wb") as f:                                    # one it cannot decrypt
             f.write(b"damaged")
         self.fake.calls.clear()

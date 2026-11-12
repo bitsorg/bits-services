@@ -174,8 +174,9 @@ class Helper:
                 self.ops["check"](passphrase.encode())  # the decrypted seed is dropped
                 return {"ok": True}
             if op == "unlock-signer":
-                _, keyid = self.ops["unlock"](passphrase.encode())
-                return {"ok": True, "key_id16": keyid[:16]}
+                said, keyid = self.ops["unlock"](passphrase.encode())
+                notes = [ln for ln in said.splitlines() if "not pushed" in ln]
+                return dict({"ok": True, "key_id16": keyid[:16]}, **({"notes": notes} if notes else {}))
             if op in SECRET_OPS:
                 return self._secrets(op, request, passphrase.encode())
             pushed = self.ops["push"](self.ops["load"](passphrase.encode()))

@@ -28,7 +28,8 @@ SIGNER = os.environ.get("SECURITY_PROXY_SERVICE", "security-proxy")
 SIGN_SLOT = os.environ.get("SIGN_KEY_SLOT", "bits-sign-key")
 SIGN_ROUTE = os.environ.get("SIGN_ROUTE_SERVICE", "bits-manifest-sign")
 SIGN_KEY = os.path.join(DIR, "secrets", "bits-sign-key.enc.pem")
-# The store tokens' key: signed by the proxy's route /sign/store (console-backend).
+# The store tokens' key: in a proxy of its own, which the backend reaches (M8b).
+STORE_SIGNER = os.environ.get("STORE_TOKEN_SIGNER_SERVICE", "store-token-signer")
 STORE_SLOT = "bits-store-token-key"
 STORE_KEY = os.path.join(DIR, "secrets", "bits-store-token-key.enc.pem")
 SECRETS_FILE = os.environ.get("SERVICE_SECRETS", os.path.join(DIR, "secrets", "service-secrets.enc"))
@@ -107,10 +108,20 @@ def signing_key_id(service=SIGNER, route=SIGN_ROUTE):
 def unlock_signer(passphrase, enc_path=SIGN_KEY, store_path=STORE_KEY):
     """Decrypts and pushes the signing key, and the store tokens' key if there is
     one; returns (what the proxy said, key id)."""
-    seeds = [(SIGN_SLOT, decrypt_signing_seed(enc_path, passphrase))]   # both, before pushing either
+    seeds = [(SIGN_SLOT, decrypt_signing_seed(enc_path, passphrase), SIGNER)]  # all, before pushing
     if os.path.isfile(store_path):
-        seeds.append((STORE_SLOT, decrypt_signing_seed(store_path, passphrase)))
-    said = "".join(push(slot, seed, SIGNER) for slot, seed in seeds)
+        seeds.append((STORE_SLOT, decrypt_signing_seed(store_path, passphrase), STORE_SIGNER))
+    said = ""
+    for slot, seed, service in seeds:
+        if service != STORE_SIGNER:
+            said += push(slot, seed, service)
+            continue
+        try:                    # the manifest signer's key is in: this one only reports
+            if not running(STORE_SIGNER):
+                raise UnlockError("%s is not running" % STORE_SIGNER)
+            said += push(slot, seed, service)
+        except UnlockError as e:
+            said += "%s not pushed: %s\n" % (slot, e)
     return said, signing_key_id()
 
 

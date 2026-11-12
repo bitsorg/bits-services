@@ -11,11 +11,6 @@
       "name": "bits-manifest-sign",
       "prefix": "/sign/bits",
       "sign": {"key": {"ingest": "bits-sign-key"}}
-    },
-    {
-      "name": "bits-store-token-sign",
-      "prefix": "/sign/store",
-      "sign": {"key": {"ingest": "bits-store-token-key"}}
     }
   ]
 }

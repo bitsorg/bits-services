@@ -447,16 +447,25 @@ The service runs as uid 65532, so `config.json` must be readable by others (`chm
 ## Store tokens
 
 The console gives store tokens to `bits login` and its own pages. They are signed by
-the security proxy's route `bits-store-token-sign` with a key of their own, kept like
-the signing key: encrypted under `secrets/`, in the proxy's memory after `make unlock`.
+the store-token signer, a security-proxy instance of their own that the backend
+reaches (it cannot reach the manifest signer after M8b), with a key kept like the
+signing key: encrypted under `secrets/`, in the proxy's memory after `make unlock`.
 
-1. Add the route of `security-proxy/config.sample.json` to the proxy's `config.json`,
-   then `docker compose up -d security-proxy`.
+1. `install -d config/store-token-signer`, copy
+   `security-proxy/store-token-signer.sample.json` there as `config.json`
+   (`sudo chown root:` it, mode 644), then
+   `docker compose --profile store-tokens up -d store-token-signer`.
 2. `make store-token-key` (the signing key's passphrase): makes the key once and
    prints its public key; put it in the store's `config.json` under `"keys"` as shown.
-3. In `.env`: `BITS_STORE_TOKEN_SIGN_ROUTE=bits-store-token-sign`, and the store's
-   `issuer` and `audience` as `BITS_STORE_TOKEN_ISSUER` and `BITS_STORE_TOKEN_AUDIENCE`;
-   then `docker compose up -d bits-console-backend` and `make unlock`.
+3. In `.env`: `BITS_STORE_TOKEN_SIGN_ROUTE=bits-store-token-sign`, the store's
+   `issuer` and `audience` as `BITS_STORE_TOKEN_ISSUER` and `BITS_STORE_TOKEN_AUDIENCE`,
+   and `store-tokens` in `COMPOSE_PROFILES`; then `docker compose up -d
+   bits-console-backend` and `make unlock` (it says `pushed slot 'bits-store-token-key'`).
+
+The key lives in the signer's memory only: after the store-token signer alone restarts,
+`make unlock` again (the helper does not, while the manifest signer holds its key).
+A `bits-store-token-sign` route added to the security proxy's `config.json` earlier
+is no longer used: remove it.
 
 ## Read tokens
 

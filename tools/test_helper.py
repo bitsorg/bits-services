@@ -24,6 +24,7 @@ UnlockError = helper.unlocking.UnlockError
 class Fakes:
     def __init__(self):
         self.state, self.calls, self.saved, self.exists, self.push_error = "no key", [], None, True, None
+        self.said = "pushed\n"
 
     def ops(self):
         def unlock(pw):
@@ -31,7 +32,7 @@ class Fakes:
             if pw != b"right-pass-9":
                 raise helper.unlocking.WrongPassphrase("wrong passphrase, or not an encrypted Ed25519 key")
             self.state = "loaded"
-            return "pushed\n", "43fd71705f29a075ffff"
+            return self.said, "43fd71705f29a075ffff"
 
         def load(pw):
             if pw != b"right-pass-9":
@@ -69,6 +70,13 @@ class HelperTest(unittest.TestCase):
     def setUp(self):
         self.fakes, self.t = Fakes(), [0.0]
         self.h = helper.Helper(self.fakes.ops(), now=lambda: self.t[0])
+
+    def test_unlock_says_what_it_did_not_push(self):
+        self.fakes.said = ("pushed slot 'bits-sign-key'\n"
+                           "bits-store-token-key not pushed: store-token-signer is not running\n")
+        self.assertEqual(self.h.handle({"op": "unlock-signer", "passphrase": "right-pass-9"}),
+                         {"ok": True, "key_id16": "43fd71705f29a075",
+                          "notes": ["bits-store-token-key not pushed: store-token-signer is not running"]})
 
     def test_status_and_unlock(self):
         self.assertEqual(self.h.handle({"op": "status"})["signer"], "no key")
