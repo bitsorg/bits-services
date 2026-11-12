@@ -444,6 +444,20 @@ The configuration's `listen` is overridden: the container always listens on :809
 The service runs as uid 65532, so `config.json` must be readable by others (`chmod
 644`; it holds no secret: the keys are in `.env`, the token seed stays out of it).
 
+## Store tokens
+
+The console gives store tokens to `bits login` and its own pages. They are signed by
+the security proxy's route `bits-store-token-sign` with a key of their own, kept like
+the signing key: encrypted under `secrets/`, in the proxy's memory after `make unlock`.
+
+1. Add the route of `security-proxy/config.sample.json` to the proxy's `config.json`,
+   then `docker compose up -d security-proxy`.
+2. `make store-token-key` (the signing key's passphrase): makes the key once and
+   prints its public key; put it in the store's `config.json` under `"keys"` as shown.
+3. In `.env`: `BITS_STORE_TOKEN_SIGN_ROUTE=bits-store-token-sign`, and the store's
+   `issuer` and `audience` as `BITS_STORE_TOKEN_ISSUER` and `BITS_STORE_TOKEN_AUDIENCE`;
+   then `docker compose up -d bits-console-backend` and `make unlock`.
+
 ## Read tokens
 
 Scripts and agents read build failures, builds and the help chat's records (its votes and

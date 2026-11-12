@@ -210,6 +210,12 @@ services:
       BITS_WEBAUTHN_REQUIRE_UV: "${BITS_WEBAUTHN_REQUIRE_UV:-1}"
       BITS_ENROLLMENT_AUTHORITY: "${BITS_ENROLLMENT_AUTHORITY:-1}"
       BITS_WEBAUTHN_REQUIRED: "${BITS_WEBAUTHN_REQUIRED:-0}"
+      # Store tokens (DEPLOYMENT.md, "Store tokens"): signed by the security proxy's
+      # route; off until the route, key id, issuer and audience are set.
+      BITS_STORE_TOKEN_SIGN_ROUTE: "${BITS_STORE_TOKEN_SIGN_ROUTE:-}"
+      BITS_STORE_TOKEN_KID: "${BITS_STORE_TOKEN_KID:-console-1}"
+      BITS_STORE_TOKEN_ISSUER: "${BITS_STORE_TOKEN_ISSUER:-}"
+      BITS_STORE_TOKEN_AUDIENCE: "${BITS_STORE_TOKEN_AUDIENCE:-}"
       # Orchestrator database, shared with bits-orchestrator (which owns and
       # migrates it); the API writes only action requests and approvals.
       BITS_ORCH_DB: /orch/orch.db

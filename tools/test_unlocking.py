@@ -61,7 +61,7 @@ class UnlockingTest(unittest.TestCase):
 
     def test_unlock_signer(self):
         path, key = self.key()
-        said, keyid = ul.unlock_signer(b"test-pass", path)
+        said, keyid = ul.unlock_signer(b"test-pass", path, os.path.join(self.tmp.name, "none"))
         self.assertEqual((said, keyid), ("pushed slot 'bits-sign-key'\n", "43fd71705f29a075ffff"))
         args, value = self.fake.calls[0]
         self.assertEqual(args, ["exec", "-T", "security-proxy", "security-proxy", "push", "bits-sign-key",
@@ -69,6 +69,32 @@ class UnlockingTest(unittest.TestCase):
         import base64
         raw = key.private_bytes(s.Encoding.Raw, s.PrivateFormat.Raw, s.NoEncryption())
         self.assertEqual(value, base64.b64encode(raw).decode())
+
+    def test_the_store_tokens_key(self):
+        import base64
+        path, _ = self.key()
+        store = os.path.join(self.tmp.name, "store.enc.pem")
+        with self.assertRaises(ul.WrongPassphrase):                       # not the signing key's
+            ul.store_token_key(b"other-pass", store, path)
+        self.assertFalse(os.path.exists(store))
+        pub = ul.store_token_key(b"test-pass", store, path)
+        self.assertEqual(oct(os.stat(store).st_mode & 0o777), "0o600")
+        self.assertEqual(ul.store_token_key(b"test-pass", store, path), pub)   # made once
+        seed = base64.b64decode(ul.decrypt_signing_seed(store, b"test-pass"))
+        raw = Ed25519PrivateKey.from_private_bytes(seed).public_key().public_bytes(
+            s.Encoding.Raw, s.PublicFormat.Raw)
+        self.assertEqual(base64.urlsafe_b64decode(pub + "="), raw)
+        ul.unlock_signer(b"test-pass", path, store)                     # pushed with the signing key
+        pushed = {a[a.index("push") + 1]: v for a, v in self.fake.calls if "push" in a}
+        self.assertEqual(list(pushed), ["bits-sign-key", "bits-store-token-key"])
+        self.assertEqual(pushed["bits-store-token-key"], base64.b64encode(seed).decode())
+        with open(store, "wb") as f:                                    # one it cannot decrypt
+            f.write(b"damaged")
+        self.fake.calls.clear()
+        with self.assertRaises(ul.UnlockError):
+            ul.unlock_signer(b"test-pass", path, store)
+        self.assertEqual(self.fake.calls, [])                           # nothing pushed
+        self.assertEqual([f for f in os.listdir(self.tmp.name) if f.startswith("tmp")], [])
 
     def test_wrong_passphrase_pushes_nothing(self):
         path, _ = self.key()

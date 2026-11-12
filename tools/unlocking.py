@@ -3,10 +3,12 @@
 """unlocking.py — what `make unlock` does, as functions the host helper reuses.
 
     tools/unlocking.py unlock-signer [secrets/bits-sign-key.enc.pem] [EXPECTED_KEYID16]
+    tools/unlocking.py store-token-key
 
 decrypts the signing key on the host (the passphrase read from the terminal) and
 pushes the raw seed into the running security proxy's ingest socket, then reads
-the loaded key's id back through its sign route. Nothing touches disk.
+the loaded key's id back through its sign route. Nothing touches disk. The store
+tokens' key (store-token-key: made once, same passphrase) goes in with it.
 """
 
 import base64
@@ -26,6 +28,9 @@ SIGNER = os.environ.get("SECURITY_PROXY_SERVICE", "security-proxy")
 SIGN_SLOT = os.environ.get("SIGN_KEY_SLOT", "bits-sign-key")
 SIGN_ROUTE = os.environ.get("SIGN_ROUTE_SERVICE", "bits-manifest-sign")
 SIGN_KEY = os.path.join(DIR, "secrets", "bits-sign-key.enc.pem")
+# The store tokens' key: signed by the proxy's route /sign/store (console-backend).
+STORE_SLOT = "bits-store-token-key"
+STORE_KEY = os.path.join(DIR, "secrets", "bits-store-token-key.enc.pem")
 SECRETS_FILE = os.environ.get("SERVICE_SECRETS", os.path.join(DIR, "secrets", "service-secrets.enc"))
 CRED_PROXY = os.environ.get("CREDENTIALS_PROXY_SERVICE", "credentials-proxy")
 # The store writer (M8a): the store's keypair goes there, out of the backend's reach.
@@ -99,10 +104,37 @@ def signing_key_id(service=SIGNER, route=SIGN_ROUTE):
     return keyid.strip()
 
 
-def unlock_signer(passphrase, enc_path=SIGN_KEY):
-    """Decrypts and pushes the signing key; returns (what the proxy said, key id)."""
-    said = push(SIGN_SLOT, decrypt_signing_seed(enc_path, passphrase), SIGNER)
+def unlock_signer(passphrase, enc_path=SIGN_KEY, store_path=STORE_KEY):
+    """Decrypts and pushes the signing key, and the store tokens' key if there is
+    one; returns (what the proxy said, key id)."""
+    seeds = [(SIGN_SLOT, decrypt_signing_seed(enc_path, passphrase))]   # both, before pushing either
+    if os.path.isfile(store_path):
+        seeds.append((STORE_SLOT, decrypt_signing_seed(store_path, passphrase)))
+    said = "".join(push(slot, seed, SIGNER) for slot, seed in seeds)
     return said, signing_key_id()
+
+
+def store_token_key(passphrase, path=STORE_KEY, sign_path=SIGN_KEY):
+    """The store tokens' public key, base64url (bits-store's "x"), of the key at
+    *path*: made first if missing, encrypted with the signing key's passphrase."""
+    from cryptography.hazmat.primitives import serialization as s
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    decrypt_signing_seed(sign_path, passphrase)          # the signing key's passphrase
+    if not os.path.isfile(path):          # written whole beside it, then linked in place
+        pem = Ed25519PrivateKey.generate().private_bytes(
+            s.Encoding.PEM, s.PrivateFormat.PKCS8, s.BestAvailableEncryption(passphrase))
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(pem)
+            with contextlib.suppress(FileExistsError):          # made meanwhile: that one
+                os.link(tmp, path)
+        finally:
+            os.unlink(tmp)
+    seed = base64.b64decode(decrypt_signing_seed(path, passphrase))
+    pub = Ed25519PrivateKey.from_private_bytes(seed).public_key().public_bytes(
+        s.Encoding.Raw, s.PublicFormat.Raw)
+    return base64.urlsafe_b64encode(pub).rstrip(b"=").decode()
 
 
 def _scrypt(passphrase, salt, n=2 ** 15, r=8, p=1):
@@ -257,6 +289,15 @@ def push_service_secrets(secrets):
 
 
 def main(argv):
+    if argv[:1] == ["store-token-key"]:
+        try:
+            pub = store_token_key(getpass.getpass("Signing key passphrase: ").encode())
+        except UnlockError as e:
+            sys.exit(str(e))
+        kid = _env_file().get("BITS_STORE_TOKEN_KID") or "console-1"
+        print("%s: in bits-store's config.json, under \"keys\":\n  \"%s\": "
+              "{\"x\": \"%s\", \"signer\": \"user\"}\nthen make unlock" % (STORE_KEY, kid, pub))
+        return
     if not argv or argv[0] != "unlock-signer":
         sys.exit(__doc__.split("\n\n")[1])
     enc = argv[1] if len(argv) > 1 and argv[1] else "secrets/bits-sign-key.enc.pem"
@@ -266,12 +307,11 @@ def main(argv):
     print(">> decrypting and pushing into slot '%s' (you will be prompted for the passphrase) ..."
           % SIGN_SLOT, flush=True)
     try:
-        seed = decrypt_signing_seed(enc, getpass.getpass("Passphrase: ").encode())
-        sys.stdout.write(push(SIGN_SLOT, seed, SIGNER))
-        print(">> verifying the loaded key via the sign route /pubkey ...", flush=True)
-        keyid16 = signing_key_id()[:16]
+        said, keyid = unlock_signer(getpass.getpass("Passphrase: ").encode(), enc)
     except UnlockError as e:
         sys.exit(str(e) + (": " + e.detail if e.detail else ""))
+    sys.stdout.write(said)
+    keyid16 = keyid[:16]
     print("   loaded key_id (16) = %s" % keyid16)
     if expect and keyid16 != expect:
         sys.exit("ERROR: loaded key_id %s != expected %s" % (keyid16, expect))
