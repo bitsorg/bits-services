@@ -276,8 +276,8 @@ def read_regular(path, limit=1 << 20):
         return text, st
 
 
-def write_env(path, text):
-    """Replaces path in one step, mode 600, owner kept (a new file: its directory's); a
+def write_env(path, text, mode=0o600):
+    """Replaces path in one step, *mode* (600), owner kept (a new file: its directory's); a
     changed old file is kept as <path>.bak-<time>. (written, backup); unchanged if only
     its date differs."""
     old, st = read_regular(path)
@@ -288,7 +288,7 @@ def write_env(path, text):
     fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".new-", dir=directory)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            os.fchmod(f.fileno(), 0o600)
+            os.fchmod(f.fileno(), mode)
             st = st or os.stat(directory)
             owner = (st.st_uid, st.st_gid) if (st.st_uid, st.st_gid) != (os.getuid(), os.getgid()) else None
             if owner:

@@ -61,10 +61,10 @@ class WrongPassphrase(UnlockError):
     """The passphrase did not decrypt (counted by the host helper's lockout)."""
 
 
-def _compose(args, value=None):
+def _compose(args, value=None, env=None):
     try:
         r = subprocess.run(["docker", "compose"] + args, cwd=DIR, capture_output=True, timeout=120,
-                           input=value.encode() if value is not None else None)
+                           input=value.encode() if value is not None else None, env=env)
     except FileNotFoundError:
         raise UnlockError("docker is not installed or not on PATH")
     except subprocess.TimeoutExpired:

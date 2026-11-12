@@ -13,6 +13,9 @@ bits-admin container's group can open; one JSON request per connection:
     {"op": "settings-plan", "changes": {...}}           (what .env would become)
     {"op": "settings-apply", "changes": {...}, "base": "<hash>"}   (writes .env, a backup kept)
         changes: the Settings form's, or {"profile": "<site-profile.yaml>"} (also saved)
+    {"op": "store"}       (tools/site_store.py: bits-store's config, its key names, the console's key)
+    {"op": "store-plan", "config": {...}, "credentials": {"NAME": "value"}}   (checked by bits-store)
+    {"op": "store-apply", "config": {...}, "credentials": {...}, "base": "<hash>"}
     {"op": "check-signer-passphrase", "passphrase": "..."}
     {"op": "unlock-signer", "passphrase": "..."}
     {"op": "push-secrets", "passphrase": "..."}
@@ -45,6 +48,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import site_hosts  # noqa: E402
 import site_settings  # noqa: E402
+import site_store  # noqa: E402
 import unlocking  # noqa: E402
 
 SOCKET = os.environ.get("BITS_ADMIN_HELPER_SOCKET", "/run/bits-admin-helper/helper.sock")
@@ -54,7 +58,8 @@ MAX_REQUEST = 262144  # a settings plan carries the changed values, or a site-pr
 TIMEOUT = 15
 FAILURES, WINDOW = 5, 600  # wrong passphrases allowed per window (seconds)
 HOSTS_TTL = 30  # seconds a hosts answer is reused
-OPS = ("status", "hosts", "check", "settings", "settings-plan", "settings-apply", "check-signer-passphrase",
+OPS = ("status", "hosts", "check", "settings", "settings-plan", "settings-apply", "store", "store-plan",
+       "store-apply", "check-signer-passphrase",
        "unlock-signer", "push-secrets", "secrets-list", "secret-set", "secret-remove")
 SECRET_OPS = ("secrets-list", "secret-set", "secret-remove")
 SLOT = re.compile(r"[a-z0-9][a-z0-9.-]{0,62}")  # gitlab-read, s3-access-<bucket>; fullmatch
@@ -100,6 +105,8 @@ class Helper:
                            "probe": site_hosts.check,
                            "settings": site_settings.collect,
                            "settings-plan": site_settings.plan, "settings-apply": site_settings.apply,
+                           "store": site_store.collect, "store-plan": site_store.plan,
+                           "store-apply": site_store.apply,
                            "check": lambda pw: unlocking.decrypt_signing_seed(unlocking.SIGN_KEY, pw),
                            "unlock": unlocking.unlock_signer,
                            "load": unlocking.load_service_secrets,
@@ -147,6 +154,21 @@ class Helper:
                                               "; " + done["profile_error"] if done.get("profile_error") else ""))
                 return dict(done, ok=True)
             except site_settings.Refused as e:  # its own words: names and rules, never a kept value
+                return {"ok": False, "error": str(e)}
+            except Exception as e:
+                log("%s failed: %s" % (op, type(e).__name__))
+                return {"ok": False, "error": "it failed; see the helper's journal"}
+        if op in ("store", "store-plan", "store-apply"):
+            try:
+                if op == "store":
+                    return dict(self.ops[op](), ok=True)
+                if op == "store-plan":
+                    return dict(self.ops[op](request.get("config"), request.get("credentials")), ok=True)
+                done = self.ops[op](request.get("config"), request.get("credentials"), str(request.get("base", "")))
+                log("store-apply: config.json %s; keys %s" % ("written" if done["written"] else "unchanged",
+                                                              ", ".join(done["credentials"]) or "unchanged"))
+                return dict(done, ok=True)
+            except site_store.Refused as e:  # names and rules, never a key's value
                 return {"ok": False, "error": str(e)}
             except Exception as e:
                 log("%s failed: %s" % (op, type(e).__name__))

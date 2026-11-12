@@ -54,6 +54,15 @@ class Fakes:
             yield
             self.calls.append(("unlock-file",))
 
+        def store_plan(config, credentials):
+            if config == "refused":
+                raise helper.site_store.Refused("bits-store refuses it: no bindings")
+            return {"base": "b0", "diff": [], "credentials": {}, "restart": False}
+
+        def store_apply(config, credentials, base):
+            self.calls.append(("store-apply", base))
+            return {"written": True, "backup": None, "credentials": ["V_AK"], "restart": True}
+
         def push(secrets):
             if isinstance(self.push_error, Exception):
                 raise self.push_error
@@ -63,13 +72,23 @@ class Fakes:
         return {"health": lambda: {"security-proxy": "healthy"}, "check": check,
                 "signer": lambda: (self.state, "43fd71705f29a075ffff" if self.state == "loaded" else ""),
                 "unlock": unlock, "load": load,
-                "save": save, "exists": lambda: self.exists, "push": push, "lock": lock}
+                "save": save, "exists": lambda: self.exists, "push": push, "lock": lock,
+                "store": lambda: {"config": {}, "credentials": ["V_AK"], "base": "b0", "console_key": None},
+                "store-plan": store_plan, "store-apply": store_apply}
 
 
 class HelperTest(unittest.TestCase):
     def setUp(self):
         self.fakes, self.t = Fakes(), [0.0]
         self.h = helper.Helper(self.fakes.ops(), now=lambda: self.t[0])
+
+    def test_store_operations(self):
+        self.assertEqual(self.h.handle({"op": "store"})["credentials"], ["V_AK"])
+        self.assertEqual(self.h.handle({"op": "store-plan", "config": "refused"}),
+                         {"ok": False, "error": "bits-store refuses it: no bindings"})
+        self.assertTrue(self.h.handle({"op": "store-plan", "config": {}})["ok"])
+        done = self.h.handle({"op": "store-apply", "config": {}, "credentials": {}, "base": "b0"})
+        self.assertEqual((done["ok"], done["restart"], self.fakes.calls[-1]), (True, True, ("store-apply", "b0")))
 
     def test_unlock_says_what_it_did_not_push(self):
         self.fakes.said = ("pushed slot 'bits-sign-key'\n"
