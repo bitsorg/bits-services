@@ -428,9 +428,11 @@ set up.
 
 bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
 and write the store's volumes through short-lived presigned URLs, so no client holds
-storage keys. It runs from a bits-store checkout, off unless started:
+storage keys. It is built from a release of bits-store, by its tag
+(`BITS_STORE_VERSION`, v0.1.0; a tag is never moved: a fix is a new release;
+`BITS_STORE_SRC=../bits-store` with `BITS_STORE_VERSION=dev` builds a checkout
+instead), and is off unless started:
 
-    git clone https://github.com/bitsorg/bits-store ../bits-store
     install -d -m 0755 config/bits-store
     # config/bits-store/config.json: see bits-store's config.example.json; the
     # test instance's is made by scripts/bits-store/test-instance.py setup DIR
@@ -438,8 +440,25 @@ storage keys. It runs from a bits-store checkout, off unless started:
     make store-up
     curl -s http://127.0.0.1:8098/health
 
-It listens on 127.0.0.1:8098 (`BITS_STORE_PORT`), on a network of its own that reaches
-its volumes; the reverse proxy in front comes with the first users outside this host.
+`make store-up` starts bits-store and `bits-store-proxy`, which terminates TLS in
+front of it with the backend's certificate (`TLS_CERT_DIR`) on port 8444
+(`BITS_STORE_HTTPS_PORT`). That is the build hosts' way in:
+`bits-store+https://<this host>:8444/store`, and `BITS_STORE` in bits-console's CI is
+`https://<this host>:8444/store`. Docker publishes the port on every address and
+past firewalld's zones, as it does the console's 443: reads of public bindings need
+no token, writes do. To narrow who reaches it, publish it on one address
+(`BITS_STORE_HTTPS_PORT=ADDRESS:8444`) or add a `DOCKER-USER` rule, and open it in
+the network firewall toward the build hosts. The proxy routes each request by its path, so one
+name's requests (an upload's start and complete, its first-writer lease) always
+reach one instance, never another while it is down: more instances can be listed in
+`bits-store/proxy.conf`'s `upstream` later. It allows GET, HEAD and POST, bodies up
+to 1 MiB (the bytes go to S3 directly), and waits up to three hours for an answer (a
+complete copies a large build in parts; beyond about 150 GiB, longer).
+
+bits-store itself listens on 127.0.0.1:8098 (`BITS_STORE_PORT`), on a network of its
+own that reaches its volumes. `/health` answers `503` when a volume's keys cannot
+list its bucket (bad keys, a missing bucket), and `bits-store -check`, which
+bits-admin runs before applying a configuration, refuses such a volume.
 The configuration's `listen` is overridden: the container always listens on :8098.
 The service runs as uid 65532, so `config.json` must be readable by others (`chmod
 644`; it holds no secret: the keys are in `secrets/bits-store.env`). It reloads

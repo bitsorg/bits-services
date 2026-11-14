@@ -85,8 +85,8 @@ store-token-key:  ## The store tokens' key: made once (the signing key's passphr
 store-build-token-key:  ## The build jobs' store tokens' key, as store-token-key
 	python3 tools/unlocking.py store-build-token-key
 
-store-up:  ## Build and start bits-store (DEPLOYMENT.md, "The store service") and wait until healthy
-	$(COMPOSE) --profile bits-store up -d --build --wait bits-store
+store-up:  ## Build and start bits-store and its TLS proxy (DEPLOYMENT.md, "The store service"), wait until healthy
+	$(COMPOSE) --profile bits-store up -d --build --wait bits-store bits-store-proxy
 
 test:  ## Functional wiring check (proxy up, backend https/healthz, backend→proxy)
 	bash scripts/functional-test.sh
