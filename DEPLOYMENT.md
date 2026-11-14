@@ -474,6 +474,23 @@ The key lives in the signer's memory only: after the store-token signer alone re
 A `bits-store-token-sign` route added to the security proxy's `config.json` earlier
 is no longer used: remove it.
 
+Build jobs get their store tokens from the console too (`POST /ops/ci/store-token`,
+with the job's CI ID token): for the community and platform of their pipeline, until
+the job's ID token expires. They are signed with a key of their own, on a second route
+of the same signer:
+
+1. The signer's `config.json` gets the `bits-store-build-token-sign` route of
+   `security-proxy/store-token-signer.sample.json`; `docker compose restart
+   store-token-signer`.
+2. `make store-build-token-key`: makes the key once and prints its public key; put it
+   in the store's `config.json` under `"keys"` as shown (`"signer": "build"`).
+3. In `.env`: `BITS_STORE_BUILD_TOKEN_SIGN_ROUTE=bits-store-build-token-sign` (and
+   `BITS_STORE_BUILD_TOKEN_KID` if not `builds-1`); then `docker compose up -d
+   bits-console-backend` and `make unlock` (`pushed slot 'bits-store-build-token-key'`).
+
+Without the route set, the console answers build jobs `503`, and builds go on with
+the S3 keys (bits-console's `BITS_STORE` switch off).
+
 ## Read tokens
 
 Scripts and agents read build failures, builds and the help chat's records (its votes and

@@ -112,6 +112,22 @@ class UnlockingTest(unittest.TestCase):
         self.assertEqual(self.fake.calls, [])                           # nothing pushed
         self.assertEqual([f for f in os.listdir(self.tmp.name) if f.startswith("tmp")], [])
 
+    def test_the_build_tokens_key_goes_in_beside_it(self):
+        path, _ = self.key()
+        store, build = (os.path.join(self.tmp.name, n) for n in ("store.enc.pem", "build.enc.pem"))
+        pubs = {ul.store_token_key(b"test-pass", store, path), ul.store_token_key(b"test-pass", build, path)}
+        self.assertEqual(len(pubs), 2)                                  # two keys
+        self.fake.running = ("store-token-signer",)
+        ul.unlock_signer(b"test-pass", path, store, build)
+        pushed = {a[a.index("push") + 1]: a[2] for a, _ in self.fake.calls if "push" in a}
+        self.assertEqual(pushed, {"bits-sign-key": "security-proxy",
+                                  "bits-store-token-key": "store-token-signer",
+                                  "bits-store-build-token-key": "store-token-signer"})
+        self.fake.calls.clear()
+        ul.unlock_signer(b"test-pass", path, store, os.path.join(self.tmp.name, "none"))
+        self.assertNotIn("bits-store-build-token-key",
+                         [a[a.index("push") + 1] for a, _ in self.fake.calls if "push" in a])
+
     def test_wrong_passphrase_pushes_nothing(self):
         path, _ = self.key()
         with self.assertRaises(ul.UnlockError) as e:

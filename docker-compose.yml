@@ -254,6 +254,11 @@ services:
       BITS_STORE_TOKEN_KID: "${BITS_STORE_TOKEN_KID:-console-1}"
       BITS_STORE_TOKEN_ISSUER: "${BITS_STORE_TOKEN_ISSUER:-}"
       BITS_STORE_TOKEN_AUDIENCE: "${BITS_STORE_TOKEN_AUDIENCE:-}"
+      # ... and the build jobs' (POST /ops/ci/store-token): their own key and route in
+      # the same signer; off until the route is set. At most a day, the job's timeout.
+      BITS_STORE_BUILD_TOKEN_SIGN_ROUTE: "${BITS_STORE_BUILD_TOKEN_SIGN_ROUTE:-}"
+      BITS_STORE_BUILD_TOKEN_KID: "${BITS_STORE_BUILD_TOKEN_KID:-builds-1}"
+      BITS_STORE_BUILD_TOKEN_MAX_TTL: "${BITS_STORE_BUILD_TOKEN_MAX_TTL:-86400}"
       # Orchestrator database, shared with bits-orchestrator (which owns and
       # migrates it); the API writes only action requests and approvals.
       BITS_ORCH_DB: /orch/orch.db

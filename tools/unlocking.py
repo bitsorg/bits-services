@@ -4,11 +4,13 @@
 
     tools/unlocking.py unlock-signer [secrets/bits-sign-key.enc.pem] [EXPECTED_KEYID16]
     tools/unlocking.py store-token-key
+    tools/unlocking.py store-build-token-key
 
 decrypts the signing key on the host (the passphrase read from the terminal) and
 pushes the raw seed into the running security proxy's ingest socket, then reads
 the loaded key's id back through its sign route. Nothing touches disk. The store
-tokens' key (store-token-key: made once, same passphrase) goes in with it.
+tokens' keys (store-token-key, store-build-token-key: made once, same passphrase)
+go in with it.
 """
 
 import base64
@@ -32,6 +34,9 @@ SIGN_KEY = os.path.join(DIR, "secrets", "bits-sign-key.enc.pem")
 STORE_SIGNER = os.environ.get("STORE_TOKEN_SIGNER_SERVICE", "store-token-signer")
 STORE_SLOT = "bits-store-token-key"
 STORE_KEY = os.path.join(DIR, "secrets", "bits-store-token-key.enc.pem")
+# ... and the build jobs' tokens' key, in the same proxy, on a route of its own.
+BUILD_SLOT = "bits-store-build-token-key"
+BUILD_KEY = os.path.join(DIR, "secrets", "bits-store-build-token-key.enc.pem")
 SECRETS_FILE = os.environ.get("SERVICE_SECRETS", os.path.join(DIR, "secrets", "service-secrets.enc"))
 CRED_PROXY = os.environ.get("CREDENTIALS_PROXY_SERVICE", "credentials-proxy")
 # The store writer (M8a): the store's keypair goes there, out of the backend's reach.
@@ -105,12 +110,13 @@ def signing_key_id(service=SIGNER, route=SIGN_ROUTE):
     return keyid.strip()
 
 
-def unlock_signer(passphrase, enc_path=SIGN_KEY, store_path=STORE_KEY):
-    """Decrypts and pushes the signing key, and the store tokens' key if there is
-    one; returns (what the proxy said, key id)."""
+def unlock_signer(passphrase, enc_path=SIGN_KEY, store_path=STORE_KEY, build_path=BUILD_KEY):
+    """Decrypts and pushes the signing key, and the store tokens' keys there are;
+    returns (what the proxy said, key id)."""
     seeds = [(SIGN_SLOT, decrypt_signing_seed(enc_path, passphrase), SIGNER)]  # all, before pushing
-    if os.path.isfile(store_path):
-        seeds.append((STORE_SLOT, decrypt_signing_seed(store_path, passphrase), STORE_SIGNER))
+    for slot, path in ((STORE_SLOT, store_path), (BUILD_SLOT, build_path)):
+        if os.path.isfile(path):
+            seeds.append((slot, decrypt_signing_seed(path, passphrase), STORE_SIGNER))
     said = ""
     for slot, seed, service in seeds:
         if service != STORE_SIGNER:
@@ -300,14 +306,18 @@ def push_service_secrets(secrets):
 
 
 def main(argv):
-    if argv[:1] == ["store-token-key"]:
+    if argv[:1] in (["store-token-key"], ["store-build-token-key"]):
+        build = argv[0] == "store-build-token-key"
+        path = BUILD_KEY if build else STORE_KEY
         try:
-            pub = store_token_key(getpass.getpass("Signing key passphrase: ").encode())
+            pub = store_token_key(getpass.getpass("Signing key passphrase: ").encode(), path)
         except UnlockError as e:
             sys.exit(str(e))
-        kid = _env_file().get("BITS_STORE_TOKEN_KID") or "console-1"
+        kid = (_env_file().get("BITS_STORE_BUILD_TOKEN_KID") or "builds-1" if build else
+               _env_file().get("BITS_STORE_TOKEN_KID") or "console-1")
         print("%s: in bits-store's config.json, under \"keys\":\n  \"%s\": "
-              "{\"x\": \"%s\", \"signer\": \"user\"}\nthen make unlock" % (STORE_KEY, kid, pub))
+              "{\"x\": \"%s\", \"signer\": \"%s\"}\nthen make unlock"
+              % (path, kid, pub, "build" if build else "user"))
         return
     if not argv or argv[0] != "unlock-signer":
         sys.exit(__doc__.split("\n\n")[1])

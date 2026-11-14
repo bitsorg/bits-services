@@ -67,6 +67,11 @@ class SiteStoreTest(unittest.TestCase):
         self.assertEqual((got["config"], got["credentials"], got["console_key"]),
                          (CONFIG, ["BITS_STORE_V_AK", "BITS_STORE_V_SK"], "B" * 43))
         self.assertNotIn("secret-value", json.dumps(got))
+        self.assertEqual((got["build_key"], got["build_kid"]), ("B" * 43, "builds-1"))
+        with mock.patch.object(ss.unlocking, "_env_file", lambda: {"BITS_STORE_BUILD_TOKEN_KID": "builds-2"}):
+            self.assertEqual(ss.build_kid(), "builds-2")                # the backend's own
+        self.assertIn(["bits-store-build-token-sign", "/sign/store-build"],
+                      [c[0][5:7] for c in self.docker.calls if "exec" in c[0]])
         self.docker.pubkey = (1, "", "no such service")
         self.assertIsNone(ss.collect()["console_key"])
 

@@ -1,5 +1,5 @@
 {
-  "_comment": "bits store-token signer: the fourth security-proxy instance. Its only route signs the store tokens the backend issues (bits login, the console), with their own Ed25519 key, pushed by `make unlock` into the 'bits-store-token-key' slot from secrets/bits-store-token-key.enc.pem (make store-token-key). The backend mounts its agent socket; it cannot reach the manifest signer (M8b). Copy to STORE_TOKEN_SIGNER_CONFIG_DIR as config.json (root-owned, read-only). 'cert' is a never-provisioned slot: the daemon needs a credential of some kind, the local sign route needs no TLS.",
+  "_comment": "bits store-token signer: the fourth security-proxy instance. Its routes sign the store tokens the backend issues, each with its own Ed25519 key pushed by `make unlock`: people's (bits login, the console; slot 'bits-store-token-key' from secrets/bits-store-token-key.enc.pem, make store-token-key) and build jobs' (POST /ops/ci/store-token; slot 'bits-store-build-token-key' from secrets/bits-store-build-token-key.enc.pem, make store-build-token-key). The backend mounts its agent socket; it cannot reach the manifest signer (M8b). Copy to STORE_TOKEN_SIGNER_CONFIG_DIR as config.json (root-owned, read-only). 'cert' is a never-provisioned slot: the daemon needs a credential of some kind, the local sign route needs no TLS.",
   "host": "0.0.0.0",
   "cert": {
     "ingest": "no-tls-sign-only"
@@ -15,6 +15,15 @@
       "sign": {
         "key": {
           "ingest": "bits-store-token-key"
+        }
+      }
+    },
+    {
+      "name": "bits-store-build-token-sign",
+      "prefix": "/sign/store-build",
+      "sign": {
+        "key": {
+          "ingest": "bits-store-build-token-key"
         }
       }
     }

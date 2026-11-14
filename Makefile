@@ -6,7 +6,7 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help init config build audit-token up down ps status logs unlock secret store-token-key credentials-check helper-unit helper-install admin-install admin-up admin-code admin-reset store-up test clean monitoring monitoring-check
+.PHONY: help init config build audit-token up down ps status logs unlock secret store-token-key store-build-token-key credentials-check helper-unit helper-install admin-install admin-up admin-code admin-reset store-up test clean monitoring monitoring-check
 
 # The monitoring stack (Phase 4), started on its own by `make monitoring`.
 MON_SERVICES := victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
@@ -81,6 +81,9 @@ admin-reset:  ## As root, all keys lost: restart bits-admin with a setup code va
 
 store-token-key:  ## The store tokens' key: made once (the signing key's passphrase); prints its public key
 	python3 tools/unlocking.py store-token-key
+
+store-build-token-key:  ## The build jobs' store tokens' key, as store-token-key
+	python3 tools/unlocking.py store-build-token-key
 
 store-up:  ## Build and start bits-store (DEPLOYMENT.md, "The store service") and wait until healthy
 	$(COMPOSE) --profile bits-store up -d --build --wait bits-store

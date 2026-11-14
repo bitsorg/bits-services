@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The store's configuration for bits-admin (ADR bits-services 0004, K): bits-store's
 config.json, the names of the keys in secrets/bits-store.env (never their values) and
-the console's store-token key. A change is checked by bits-store itself (-check) before
+the console's store-token keys (people's and build jobs'). A change is checked by bits-store itself (-check) before
 it is written; the running store reloads config.json, new keys need make store-up.
 
     tools/site_store.py       # the JSON the host helper hands bits-admin
@@ -28,6 +28,7 @@ CREDENTIALS = os.path.join(DIR, "secrets", "bits-store.env")
 NAME = re.compile(r"BITS_STORE_[A-Z0-9_]{1,52}")
 MAX_CONFIG, MAX_VALUE = 128 * 1024, 4096  # a request to the helper holds both
 SIGNER, ROUTE, PREFIX = "store-token-signer", "bits-store-token-sign", "/sign/store"
+BUILD_ROUTE, BUILD_PREFIX = "bits-store-build-token-sign", "/sign/store-build"
 # Run inside the signer's container: its gate token never leaves it.
 PUBKEY = r"""
 import base64, json, subprocess, sys, urllib.request
@@ -71,10 +72,10 @@ def _current():
     return text or "", creds, base
 
 
-def console_key():
+def console_key(route=ROUTE, prefix=PREFIX):
     """The store-token signer's public key, base64url (bits-store's "x"); None if it
-    does not answer (not running, no key pushed)."""
-    code, out, _ = unlocking._compose(["exec", "-T", SIGNER, "python3", "-", ROUTE, PREFIX,
+    does not answer (not running, no key pushed). The build key's with its route."""
+    code, out, _ = unlocking._compose(["exec", "-T", SIGNER, "python3", "-", route, prefix,
                                        unlocking.AGENT], PUBKEY)
     out = out.strip()
     return out if code == 0 and re.fullmatch(r"[A-Za-z0-9_-]{43}", out) else None
@@ -87,7 +88,13 @@ def collect():
     except ValueError:
         config = None
     return {"config": config, "path": os.path.relpath(config_path(), DIR), "credentials": sorted(creds),
-            "base": base, "console_key": console_key()}
+            "base": base, "console_key": console_key(),
+            "build_key": console_key(BUILD_ROUTE, BUILD_PREFIX), "build_kid": build_kid()}
+
+
+def build_kid():
+    """The id bits-store knows the build key by: the backend's, from .env."""
+    return unlocking._env_file().get("BITS_STORE_BUILD_TOKEN_KID") or "builds-1"
 
 
 def _named(config):
