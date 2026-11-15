@@ -140,10 +140,9 @@ torn down and recreated freely; while it is down those scrapes just fail.
 
 The store gauges (`bits_store_*`, the Monitoring page's store bar) come from
 bits-store's index, scraped every minute (job `bits-store`, see "The store service");
-the push-agent takes those once there are any. Until then builds holding S3 keys push
-them, and bits-orchestrator when `BITS_ORCH_METRICS_URL` is set in `.env`
-(`http://host.docker.internal:8428`): empty it once the store bar shows the scraped
-values. Without bits-store the `bits-store` scrape just fails.
+the push-agent takes those once there are any, else the ones builds with S3 keys push.
+Without bits-store the `bits-store` scrape just fails. `BITS_ORCH_METRICS_URL` and
+`BITS_ORCH_STORE_GAUGES_S` are no longer read: remove them from `.env`.
 
 ### Moving the data over from the testbed (once)
 

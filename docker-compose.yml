@@ -424,11 +424,6 @@ services:
       # Vulnerability scans of the builds' SBOMs: the sbom-scanner below
       # (COMPOSE_PROFILES=scanner, then http://sbom-scanner:8080). Empty = off.
       BITS_ORCH_SCANNER_URL: "${BITS_ORCH_SCANNER_URL:-}"
-      # The store gauges for Monitoring, pushed to VictoriaMetrics through the host,
-      # e.g. http://host.docker.internal:8428; every BITS_ORCH_STORE_GAUGES_S
-      # (default 3600, at least 300). Empty = off (builds with S3 keys still push).
-      BITS_ORCH_METRICS_URL: "${BITS_ORCH_METRICS_URL:-}"
-      BITS_ORCH_STORE_GAUGES_S: "${BITS_ORCH_STORE_GAUGES_S:-}"
       # The help chat (the backend's): set, the worker reads the docs it answers
       # from, hourly from GitHub and GitLab, into its index; with an embedding model
       # it also asks that model (never the chat's) for the sections' vectors.
