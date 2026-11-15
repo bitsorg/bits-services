@@ -138,6 +138,12 @@ testbed's prepub and Stratum 1s) are scraped through their published ports via
 `host.docker.internal`, not by joining their networks, so the testbed can be
 torn down and recreated freely; while it is down those scrapes just fail.
 
+The store gauges (`bits_store_*`, the Monitoring page's store bar) come from
+builds that hold S3 keys and, with `BITS_ORCH_METRICS_URL` set in `.env` to
+`http://host.docker.internal:8428` (the `VM_HOST_PORT`), from bits-orchestrator,
+hourly (`BITS_ORCH_STORE_GAUGES_S`). Builds through bits-store have no keys, so
+set it before removing theirs.
+
 ### Moving the data over from the testbed (once)
 
 The two stacks publish the same ports, so the testbed's monitoring containers
