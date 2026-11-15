@@ -139,10 +139,11 @@ testbed's prepub and Stratum 1s) are scraped through their published ports via
 torn down and recreated freely; while it is down those scrapes just fail.
 
 The store gauges (`bits_store_*`, the Monitoring page's store bar) come from
-builds that hold S3 keys and, with `BITS_ORCH_METRICS_URL` set in `.env` to
-`http://host.docker.internal:8428` (the `VM_HOST_PORT`), from bits-orchestrator,
-hourly (`BITS_ORCH_STORE_GAUGES_S`). Builds through bits-store have no keys, so
-set it before removing theirs.
+bits-store's index, scraped every minute (job `bits-store`, see "The store service");
+the push-agent takes those once there are any. Until then builds holding S3 keys push
+them, and bits-orchestrator when `BITS_ORCH_METRICS_URL` is set in `.env`
+(`http://host.docker.internal:8428`): empty it once the store bar shows the scraped
+values. Without bits-store the `bits-store` scrape just fails.
 
 ### Moving the data over from the testbed (once)
 
@@ -435,7 +436,7 @@ set up.
 bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
 and write the store's volumes through short-lived presigned URLs, so no client holds
 storage keys. It is built from a release of bits-store, by its tag
-(`BITS_STORE_VERSION`, v0.1.0; a tag is never moved: a fix is a new release;
+(`BITS_STORE_VERSION`, v0.2.0; a tag is never moved: a fix is a new release;
 `BITS_STORE_SRC=../bits-store` with `BITS_STORE_VERSION=dev` builds a checkout
 instead), and is off unless started:
 
@@ -475,6 +476,14 @@ running one kept); new keys need `make store-up`. Moving from an older setup: th
 the store must enter: `chmod 755 config/bits-store`). Compose 2.24 or newer reads the
 optional key file. bits-admin rewrites `secrets/bits-store.env` (`NAME='value'`), its
 keys named `BITS_STORE_...` by the volumes.
+
+bits-store (v0.2.0 or newer: older releases refuse `-data`) keeps an index of what
+each bucket holds in the `bits-store-data` volume: each write through it adds its
+object, and it lists each bucket against the index at start when new, then daily
+(`index_verify` in `config.json`), logging what changed outside it (`index: volume
+... missing, changed, extra`). It is a cache: removing the volume costs one listing.
+From it, `/metrics` gives the store gauges to vmagent (on `store-metrics-net`; the
+proxy answers `404` for it).
 
 ## Store tokens
 

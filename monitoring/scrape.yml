@@ -49,6 +49,15 @@ scrape_configs:
         labels:
           role: audit
 
+  # ── The store service (bits-store, when started: make store-up) ─────────
+  # The store gauges (bits_store_*, the Monitoring page's store bar) from its index.
+  - job_name: 'bits-store'
+    scrape_interval: 60s
+    static_configs:
+      - targets: ['bits-store:8098']
+        labels:
+          role: store
+
   # ── cvmfs-testbed (published ports on this host) ─────────────────────────
   - job_name: 'cvmfs-prepub'
     metrics_path: '/api/v1/metrics'

@@ -478,13 +478,13 @@ services:
     build:
       # A release, by its tag (never moved); a checkout instead: BITS_STORE_SRC=../bits-store
       # with BITS_STORE_VERSION=dev, so that the release's image keeps its name.
-      context: ${BITS_STORE_SRC:-https://github.com/bitsorg/bits-store.git#${BITS_STORE_VERSION:-v0.1.0}}
+      context: ${BITS_STORE_SRC:-https://github.com/bitsorg/bits-store.git#${BITS_STORE_VERSION:-v0.2.0}}
       args:
-        VERSION: ${BITS_STORE_VERSION:-v0.1.0}
-    image: bits-services/bits-store:${BITS_STORE_VERSION:-v0.1.0}
+        VERSION: ${BITS_STORE_VERSION:-v0.2.0}
+    image: bits-services/bits-store:${BITS_STORE_VERSION:-v0.2.0}
     profiles:
       - bits-store
-    command: ["-config", "/etc/bits-store/config.json", "-listen", ":8098"]
+    command: ["-config", "/etc/bits-store/config.json", "-listen", ":8098", "-data", "/var/lib/bits-store"]
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -504,10 +504,12 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - bits-store-data:/var/lib/bits-store   # the index: a cache, one listing rebuilds it
     ports:
       - "127.0.0.1:${BITS_STORE_PORT:-8098}:8098"
     networks:
       - bits-store-net
+      - store-metrics-net       # its /metrics, for vmagent
 
   # TLS in front of bits-store, the build hosts' way in (DEPLOYMENT.md, "The store
   # service"): by path, so that one name's requests reach one instance; the
@@ -689,6 +691,7 @@ services:
     networks:
       - monitoring-net
       - audit-net               # scrapes audit-log's /metrics
+      - store-metrics-net       # scrapes bits-store's /metrics
 
   # Per-container CPU / memory / network / disk.
   cadvisor:
@@ -789,6 +792,10 @@ networks:
   # bits-store <-> its volumes (not internal: S3 is outside). Nothing else is on it.
   bits-store-net:
     driver: bridge
+  # vmagent <-> bits-store's /metrics. Internal: no way in or out.
+  store-metrics-net:
+    driver: bridge
+    internal: true
   # The worker (and vmagent) <-> audit-log. Internal: no way in or out.
   audit-net:
     driver: bridge
@@ -820,3 +827,5 @@ volumes:
   orch-data:
   # grype's vulnerability database (sbom-scanner).
   scanner-db:
+  # bits-store's index of its buckets (a cache: one listing rebuilds it).
+  bits-store-data:
