@@ -435,7 +435,7 @@ set up.
 bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
 and write the store's volumes through short-lived presigned URLs, so no client holds
 storage keys. It is built from a release of bits-store, by its tag
-(`BITS_STORE_VERSION`, v0.5.0; a tag is never moved: a fix is a new release;
+(`BITS_STORE_VERSION`, v0.5.1; a tag is never moved: a fix is a new release;
 `BITS_STORE_SRC=../bits-store` with `BITS_STORE_VERSION=dev` builds a checkout
 instead), and is off unless started:
 
@@ -490,14 +490,14 @@ Without them every common manifest counts and none shows as signed.
 
 `make store-gc` (after `make store-up`, whose index it reads; exit 2 when refused)
 plans a collection from the index and deletes nothing: per architecture, the packages
-older than a week whose hash no common manifest, no BOM of their source builds and no
-young BOM lists, not read through bits-store in the last 30 days (nor 10 times in the
-last 120), in architectures a verified common manifest lists; `make store-gc
-ARGS=-gc-list` names them. It refuses while the index may not be the store
-(`manifest_keys` unset, an old listing, manifests unread, the common manifests changed
-since read), while reads have been counted for less than 30 days (from v0.5.0), or when
-more than a quarter of an architecture's packages would go; `bits-store -gc` in
-bits-store's README.
+older than 30 days that no BOM and no common manifest lists, not among the 3 newest
+builds of their version, not read through bits-store in the last 30 days (nor 10 times
+in the last 120), in architectures a verified common manifest lists; `make store-gc
+ARGS=-gc-list` names them. Sources (`SOURCES/cache`) are never planned: they are kept
+for reference. It refuses while the index may not be the store (`manifest_keys` unset,
+an old listing, manifests unread, the common manifests changed since read), while reads
+have been counted for less than 30 days (from v0.5.0), or when more than a quarter of an
+architecture's packages would go; `bits-store -gc` in bits-store's README.
 
 ## Store tokens
 
