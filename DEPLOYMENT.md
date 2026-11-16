@@ -435,7 +435,7 @@ set up.
 bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
 and write the store's volumes through short-lived presigned URLs, so no client holds
 storage keys. It is built from a release of bits-store, by its tag
-(`BITS_STORE_VERSION`, v0.5.1; a tag is never moved: a fix is a new release;
+(`BITS_STORE_VERSION`, v0.5.2; a tag is never moved: a fix is a new release;
 `BITS_STORE_SRC=../bits-store` with `BITS_STORE_VERSION=dev` builds a checkout
 instead), and is off unless started:
 
@@ -559,16 +559,30 @@ in the bucket is rebuilt. bits-store reaches the signer through its agent socket
    `/restricted`.
 3. `docker compose up -d bits-store` (the socket and network) and `make unlock`
    (`pushed slot 'bits-restricted-sign-key'`).
+4. The private bucket, `bits-private-store` (no public-read policy; nothing else is
+   given its keys), its keys in `secrets/bits-store.env`; bits-store's `config.json`
+   (v0.5.2 or later: `gate`, `restricted_signer`) gets, beside what it has, a volume
+   for it, the gated binding at `/restricted` and the signer, then `make store-up`:
 
-bits-store (v0.6.0 or later: `gate`, `restricted_signer`) uses it once its
-`config.json` has a gated binding and `restricted_signer` (`agent_socket`
-`/run/store-token-signer/agent.sock`, `route` `bits-restricted-sign`, `host`
-`store-token-signer`, `prefix` `/sign/restricted`). The key lives in the signer's
-memory only: after the signer restarts, `make unlock` again; meanwhile uploads to
-`/restricted` answer `503 unsigned` and bits keeps those builds on their hosts. With
-the socket, bits-store could also sign store tokens, which it is the one to check
-anyway; the backend could sign restricted builds too, as it can already have
-bits-store sign any upload with a build token it mints.
+       "volumes":  {"private": {"endpoint": "https://s3.cern.ch", "bucket": "bits-private-store",
+                    "region": "us-east-1", "access_key_env": "BITS_STORE_PRIVATE_ACCESS_KEY",
+                    "secret_key_env": "BITS_STORE_PRIVATE_SECRET_KEY"}},
+       "bindings": [{"prefix": "/restricted", "volume": "private", "key_prefix": "TARS",
+                     "format": "tarballs", "gate": "group", "readers": {"sft": ["lhcb"]}}],
+       "restricted_signer": {"agent_socket": "/run/store-token-signer/agent.sock",
+                             "route": "bits-restricted-sign", "host": "store-token-signer",
+                             "prefix": "/sign/restricted"}
+
+   Each community's builds are its own (`TARS/<community>/<arch>/store/...`);
+   `readers` lets the communities listed read another's (here lhcb sft's), none by
+   default. bits-store refuses another binding on that bucket, and a gate without a
+   signer. Build jobs' store tokens from the console cover `/restricted/<arch>/**`.
+
+The key lives in the signer's memory only: after the signer restarts, `make unlock`
+again; meanwhile uploads to `/restricted` answer `503 unsigned` and bits keeps those
+builds on their hosts. With the socket, bits-store could also sign store tokens,
+which it is the one to check anyway; the backend could sign restricted builds too, as
+it can already have bits-store sign any upload with a build token it mints.
 
 ## Read tokens
 
