@@ -6,7 +6,7 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help init config build audit-token up down ps status logs unlock secret store-token-key store-build-token-key credentials-check helper-unit helper-install admin-install admin-up admin-code admin-reset store-up test clean monitoring monitoring-check
+.PHONY: help init config build audit-token up down ps status logs unlock secret store-token-key store-build-token-key credentials-check helper-unit helper-install admin-install admin-up admin-code admin-reset store-up store-gc test clean monitoring monitoring-check
 
 # The monitoring stack (Phase 4), started on its own by `make monitoring`.
 MON_SERVICES := victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
@@ -87,6 +87,9 @@ store-build-token-key:  ## The build jobs' store tokens' key, as store-token-key
 
 store-up:  ## Build and start bits-store and its TLS proxy (DEPLOYMENT.md, "The store service"), wait until healthy
 	$(COMPOSE) --profile bits-store up -d --build --wait bits-store bits-store-proxy
+
+store-gc:  ## Plan a collection of the store's packages no manifest keeps (DEPLOYMENT.md, "The store service"); deletes nothing
+	$(COMPOSE) --profile bits-store run --rm --no-deps bits-store -gc -config /etc/bits-store/config.json -data /var/lib/bits-store
 
 test:  ## Functional wiring check (proxy up, backend https/healthz, backend→proxy)
 	bash scripts/functional-test.sh

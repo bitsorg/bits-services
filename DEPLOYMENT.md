@@ -435,7 +435,7 @@ set up.
 bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
 and write the store's volumes through short-lived presigned URLs, so no client holds
 storage keys. It is built from a release of bits-store, by its tag
-(`BITS_STORE_VERSION`, v0.3.0; a tag is never moved: a fix is a new release;
+(`BITS_STORE_VERSION`, v0.4.0; a tag is never moved: a fix is a new release;
 `BITS_STORE_SRC=../bits-store` with `BITS_STORE_VERSION=dev` builds a checkout
 instead), and is off unless started:
 
@@ -487,6 +487,14 @@ for the store bar's per-build split: put the public keys that sign the common
 manifests (bits' `keys/*.pem`, as PEM text) in `config.json` under
 `"manifest_keys"` (bits-admin's Store page), so that only verified ones count.
 Without them every common manifest counts and none shows as signed.
+
+`make store-gc` (after `make store-up` of v0.4.0, whose index it reads; exit 2 when
+refused) plans a collection from the index and deletes nothing: per
+architecture, the packages older than a week whose hash no common manifest, no BOM of
+their source builds and no young BOM lists, in architectures a verified common manifest
+lists. It refuses while the index may not be the store (`manifest_keys` unset, an old
+listing, manifests unread, the common manifests changed since read) or when more than a
+quarter of an architecture's packages would go; `bits-store -gc` in bits-store's README.
 
 ## Store tokens
 
