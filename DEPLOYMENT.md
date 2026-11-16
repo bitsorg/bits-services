@@ -435,7 +435,7 @@ set up.
 bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
 and write the store's volumes through short-lived presigned URLs, so no client holds
 storage keys. It is built from a release of bits-store, by its tag
-(`BITS_STORE_VERSION`, v0.2.0; a tag is never moved: a fix is a new release;
+(`BITS_STORE_VERSION`, v0.3.0; a tag is never moved: a fix is a new release;
 `BITS_STORE_SRC=../bits-store` with `BITS_STORE_VERSION=dev` builds a checkout
 instead), and is off unless started:
 
@@ -482,7 +482,11 @@ object, and it lists each bucket against the index at start when new, then daily
 (`index_verify` in `config.json`), logging what changed outside it (`index: volume
 ... missing, changed, extra`). It is a cache: removing the volume costs one listing.
 From it, `/metrics` gives the store gauges to vmagent (on `store-metrics-net`; the
-proxy answers `404` for it).
+proxy answers `404` for it). From v0.3.0 it also reads the BOMs and common manifests,
+for the store bar's per-build split: put the public keys that sign the common
+manifests (bits' `keys/*.pem`, as PEM text) in `config.json` under
+`"manifest_keys"` (bits-admin's Store page), so that only verified ones count.
+Without them every common manifest counts and none shows as signed.
 
 ## Store tokens
 
