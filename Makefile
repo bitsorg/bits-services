@@ -88,8 +88,8 @@ store-build-token-key:  ## The build jobs' store tokens' key, as store-token-key
 store-up:  ## Build and start bits-store and its TLS proxy (DEPLOYMENT.md, "The store service"), wait until healthy
 	$(COMPOSE) --profile bits-store up -d --build --wait bits-store bits-store-proxy
 
-store-gc:  ## Plan a collection of the store's packages no manifest keeps (DEPLOYMENT.md, "The store service"); deletes nothing
-	$(COMPOSE) --profile bits-store run --rm --no-deps bits-store -gc -config /etc/bits-store/config.json -data /var/lib/bits-store
+store-gc:  ## Plan a collection of the store's packages no manifest keeps (DEPLOYMENT.md, "The store service"); deletes nothing; ARGS=-gc-list names them
+	$(COMPOSE) --profile bits-store run --rm --no-deps bits-store -gc -config /etc/bits-store/config.json -data /var/lib/bits-store $(ARGS)
 
 test:  ## Functional wiring check (proxy up, backend https/healthz, backend→proxy)
 	bash scripts/functional-test.sh
