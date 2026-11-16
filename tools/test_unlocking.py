@@ -128,6 +128,37 @@ class UnlockingTest(unittest.TestCase):
         self.assertNotIn("bits-store-build-token-key",
                          [a[a.index("push") + 1] for a, _ in self.fake.calls if "push" in a])
 
+    def test_the_restricted_builds_key(self):
+        import base64
+        import hashlib
+        path, _ = self.key()
+        restricted = os.path.join(self.tmp.name, "restricted.enc.pem")
+        pub = ul.store_token_key(b"test-pass", restricted, path)
+        self.fake.running = ("store-token-signer",)
+        none = os.path.join(self.tmp.name, "none")
+        ul.unlock_signer(b"test-pass", path, none, none, restricted)
+        pushed = {a[a.index("push") + 1]: a[2] for a, _ in self.fake.calls if "push" in a}
+        self.assertEqual(pushed, {"bits-sign-key": "security-proxy",
+                                  "bits-restricted-sign-key": "store-token-signer"})
+        pem, kid = ul.restricted_pem(pub)
+        raw = s.load_pem_public_key(pem.encode()).public_bytes(s.Encoding.Raw, s.PublicFormat.Raw)
+        self.assertEqual(raw, base64.urlsafe_b64decode(pub + "="))
+        self.assertEqual(kid, hashlib.sha256(raw).hexdigest()[:16])     # bits' key_id
+        out = io.StringIO()
+        def made(_, path):
+            self.assertEqual(path, ul.RESTRICTED_KEY)                     # its own key, no other
+            return pub
+        with mock.patch.object(ul, "store_token_key", made), \
+             mock.patch.object(ul.getpass, "getpass", lambda *a: "test-pass"), \
+             contextlib.redirect_stdout(out):
+            ul.main(["restricted-sign-key"])
+        self.assertIn(pem, out.getvalue())
+        self.assertIn("keys/restricted/", out.getvalue())
+        self.assertIn("key id %s" % kid, out.getvalue())
+        # bits' key_id of a fixed key (RFC 8032's test 1 public key)
+        fixed = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
+        self.assertEqual(ul.restricted_pem(fixed)[1], "21fe31dfa154a261")
+
     def test_wrong_passphrase_pushes_nothing(self):
         path, _ = self.key()
         with self.assertRaises(ul.UnlockError) as e:

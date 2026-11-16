@@ -539,6 +539,37 @@ of the same signer:
 Without the route set, the console answers build jobs `503`, and builds go on with
 the S3 keys (bits-console's `BITS_STORE` switch off).
 
+### The restricted builds' signing key
+
+Builds that may not be redistributed (`redistributable: sources|none`) are kept by
+bits-store in a private bucket under `/restricted`, one folder per community, each
+signed when stored with a key of the same signer, on a third route; bits reuses one
+only when that signature verifies over the bytes it downloaded, so a tarball swapped
+in the bucket is rebuilt. bits-store reaches the signer through its agent socket
+(mounted read-only, group `bitssign`) on the internal `restricted-sign-net`:
+
+1. The signer's `config.json` gets the `bits-restricted-sign` route of
+   `security-proxy/store-token-signer.sample.json`; `docker compose --profile
+   store-tokens up -d store-token-signer` (recreated, on its new network: its keys
+   are gone until step 3, and the console's store tokens with them).
+2. `make restricted-sign-key`: makes the key once and prints its public key (PEM)
+   and key id. bits trusts it saved as a `.pem` under `keys/restricted/` (in bits
+   itself, or under `restricted/` of a `$BITS_TRUST_KEYS` directory on the build
+   hosts), for these builds only; until then bits neither writes nor reads
+   `/restricted`.
+3. `docker compose up -d bits-store` (the socket and network) and `make unlock`
+   (`pushed slot 'bits-restricted-sign-key'`).
+
+bits-store (v0.6.0 or later: `gate`, `restricted_signer`) uses it once its
+`config.json` has a gated binding and `restricted_signer` (`agent_socket`
+`/run/store-token-signer/agent.sock`, `route` `bits-restricted-sign`, `host`
+`store-token-signer`, `prefix` `/sign/restricted`). The key lives in the signer's
+memory only: after the signer restarts, `make unlock` again; meanwhile uploads to
+`/restricted` answer `503 unsigned` and bits keeps those builds on their hosts. With
+the socket, bits-store could also sign store tokens, which it is the one to check
+anyway; the backend could sign restricted builds too, as it can already have
+bits-store sign any upload with a build token it mints.
+
 ## Read tokens
 
 Scripts and agents read build failures, builds and the help chat's records (its votes and

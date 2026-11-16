@@ -5,12 +5,13 @@
     tools/unlocking.py unlock-signer [secrets/bits-sign-key.enc.pem] [EXPECTED_KEYID16]
     tools/unlocking.py store-token-key
     tools/unlocking.py store-build-token-key
+    tools/unlocking.py restricted-sign-key
 
 decrypts the signing key on the host (the passphrase read from the terminal) and
 pushes the raw seed into the running security proxy's ingest socket, then reads
 the loaded key's id back through its sign route. Nothing touches disk. The store
-tokens' keys (store-token-key, store-build-token-key: made once, same passphrase)
-go in with it.
+tokens' keys and the /restricted builds' (store-token-key, store-build-token-key,
+restricted-sign-key: made once, same passphrase) go in with it.
 """
 
 import base64
@@ -37,6 +38,9 @@ STORE_KEY = os.path.join(DIR, "secrets", "bits-store-token-key.enc.pem")
 # ... and the build jobs' tokens' key, in the same proxy, on a route of its own.
 BUILD_SLOT = "bits-store-build-token-key"
 BUILD_KEY = os.path.join(DIR, "secrets", "bits-store-build-token-key.enc.pem")
+# ... and bits-store's, signing the builds it keeps in /restricted: a route of its own there.
+RESTRICTED_SLOT = "bits-restricted-sign-key"
+RESTRICTED_KEY = os.path.join(DIR, "secrets", "bits-restricted-sign-key.enc.pem")
 SECRETS_FILE = os.environ.get("SERVICE_SECRETS", os.path.join(DIR, "secrets", "service-secrets.enc"))
 CRED_PROXY = os.environ.get("CREDENTIALS_PROXY_SERVICE", "credentials-proxy")
 # The store writer (M8a): the store's keypair goes there, out of the backend's reach.
@@ -110,11 +114,13 @@ def signing_key_id(service=SIGNER, route=SIGN_ROUTE):
     return keyid.strip()
 
 
-def unlock_signer(passphrase, enc_path=SIGN_KEY, store_path=STORE_KEY, build_path=BUILD_KEY):
-    """Decrypts and pushes the signing key, and the store tokens' keys there are;
-    returns (what the proxy said, key id)."""
+def unlock_signer(passphrase, enc_path=SIGN_KEY, store_path=STORE_KEY, build_path=BUILD_KEY,
+                  restricted_path=RESTRICTED_KEY):
+    """Decrypts and pushes the signing key, and the store-token signer's keys there
+    are; returns (what the proxy said, key id)."""
     seeds = [(SIGN_SLOT, decrypt_signing_seed(enc_path, passphrase), SIGNER)]  # all, before pushing
-    for slot, path in ((STORE_SLOT, store_path), (BUILD_SLOT, build_path)):
+    for slot, path in ((STORE_SLOT, store_path), (BUILD_SLOT, build_path),
+                       (RESTRICTED_SLOT, restricted_path)):
         if os.path.isfile(path):
             seeds.append((slot, decrypt_signing_seed(path, passphrase), STORE_SIGNER))
     said = ""
@@ -305,7 +311,29 @@ def push_service_secrets(secrets):
     return where
 
 
+def restricted_pem(pub):
+    """The PEM public key, and bits' key id, of a store_token_key answer: what bits
+    trusts under keys/restricted/ (nothing else)."""
+    import hashlib
+    from cryptography.hazmat.primitives import serialization as s
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    raw = base64.urlsafe_b64decode(pub + "=")
+    pem = Ed25519PublicKey.from_public_bytes(raw).public_bytes(
+        s.Encoding.PEM, s.PublicFormat.SubjectPublicKeyInfo).decode()
+    return pem, hashlib.sha256(raw).hexdigest()[:16]
+
+
 def main(argv):
+    if argv[:1] == ["restricted-sign-key"]:
+        try:
+            pub = store_token_key(getpass.getpass("Signing key passphrase: ").encode(), RESTRICTED_KEY)
+        except UnlockError as e:
+            sys.exit(str(e))
+        pem, kid = restricted_pem(pub)
+        print("%s (key id %s): its public key, saved as a .pem under bits' keys/restricted/ (or\n"
+              "restricted/ of a $BITS_TRUST_KEYS directory on the build hosts), then make unlock:\n%s"
+              % (RESTRICTED_KEY, kid, pem), end="")
+        return
     if argv[:1] in (["store-token-key"], ["store-build-token-key"]):
         build = argv[0] == "store-build-token-key"
         path = BUILD_KEY if build else STORE_KEY

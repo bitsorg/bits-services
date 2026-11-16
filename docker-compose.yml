@@ -140,10 +140,10 @@ services:
       start_period: 10s
 
   # ─── The store-token signer ────────────────────────────────────────────────
-  # A fourth security-proxy instance: its only route signs store tokens with their
-  # own key. The backend reaches it (it issues them) but not the manifest signer
-  # (M8b). Config: security-proxy/store-token-signer.sample.json; make unlock
-  # pushes its key. Off unless asked: --profile store-tokens.
+  # A fourth security-proxy instance: its routes sign store tokens, and bits-store's
+  # /restricted builds, each with its own key. The backend and bits-store reach it,
+  # not the manifest signer (M8b). Config: security-proxy/store-token-signer.sample.json;
+  # make unlock pushes its keys. Off unless asked: --profile store-tokens.
   store-token-signer:
     image: bits-services/security-proxy:${BITS_IMAGE_TAG:-local}
     pull_policy: never          # built by security-proxy above
@@ -168,6 +168,7 @@ services:
       - "10002"
     networks:
       - token-net
+      - restricted-sign-net     # bits-store signs the builds it keeps in /restricted
     healthcheck:
       test: ["CMD-SHELL", "test -S /run/security-proxy/agent.sock"]
       interval: 30s
@@ -500,11 +501,17 @@ services:
         bind:
           create_host_path: false
       - bits-store-data:/var/lib/bits-store   # the index: a cache, one listing rebuilds it
+      # The store-token signer's agent socket: a /restricted build is signed when
+      # stored (restricted_signer in config.json); gid 10002 = bitssign, its group.
+      - store-token-signer-sockets:/run/store-token-signer:ro
+    group_add:
+      - "10002"
     ports:
       - "127.0.0.1:${BITS_STORE_PORT:-8098}:8098"
     networks:
       - bits-store-net
       - store-metrics-net       # its /metrics, for vmagent
+      - restricted-sign-net     # the signer's route
 
   # TLS in front of bits-store, the build hosts' way in (DEPLOYMENT.md, "The store
   # service"): by path, so that one name's requests reach one instance; the
@@ -787,6 +794,11 @@ networks:
   # bits-store <-> its volumes (not internal: S3 is outside). Nothing else is on it.
   bits-store-net:
     driver: bridge
+  # bits-store <-> the store-token signer, for the /restricted builds' signatures.
+  # Internal: no way in or out.
+  restricted-sign-net:
+    driver: bridge
+    internal: true
   # vmagent <-> bits-store's /metrics. Internal: no way in or out.
   store-metrics-net:
     driver: bridge
@@ -814,7 +826,7 @@ volumes:
   credential-sockets:
   # The store writer's agent socket; read-only for the worker alone.
   store-writer-sockets:
-  # The store-token signer's agent socket; read-only for the backend.
+  # The store-token signer's agent socket; read-only for the backend and bits-store.
   store-token-signer-sockets:
   # Persistent WebAuthn passkey store for the backend (survives restarts).
   webauthn-creds:
