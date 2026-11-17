@@ -474,10 +474,10 @@ services:
     build:
       # A release, by its tag (never moved); a checkout instead: BITS_STORE_SRC=../bits-store
       # with BITS_STORE_VERSION=dev, so that the release's image keeps its name.
-      context: ${BITS_STORE_SRC:-https://github.com/bitsorg/bits-store.git#${BITS_STORE_VERSION:-v0.5.3}}
+      context: ${BITS_STORE_SRC:-https://github.com/bitsorg/bits-store.git#${BITS_STORE_VERSION:-v0.5.4}}
       args:
-        VERSION: ${BITS_STORE_VERSION:-v0.5.3}
-    image: bits-services/bits-store:${BITS_STORE_VERSION:-v0.5.3}
+        VERSION: ${BITS_STORE_VERSION:-v0.5.4}
+    image: bits-services/bits-store:${BITS_STORE_VERSION:-v0.5.4}
     profiles:
       - bits-store
     command: ["-config", "/etc/bits-store/config.json", "-listen", ":8098", "-data", "/var/lib/bits-store"]
