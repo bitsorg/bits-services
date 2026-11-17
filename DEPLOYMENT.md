@@ -616,7 +616,14 @@ nothing else. An older bits-store refuses a configuration with an `admin` key:
    unlock`).
 2. `make store-admin-token-key`: makes the key once and prints its public key; put it
    in the store's `config.json` under `"keys"` as shown (`"signer": "admin"`, id
-   `admin-1`); then `make unlock` (`pushed slot 'bits-store-admin-token-key'`).
+   `admin-1`, or `BITS_STORE_ADMIN_TOKEN_KID`); then `make unlock` (`pushed slot
+   'bits-store-admin-token-key'`).
+3. In `.env`: `BITS_STORE_ADMIN_URL=http://bits-store-admin:8099` (its admin
+   listener, bound to its address on the internal `store-admin-net`, which the backend
+   alone shares) and
+   `BITS_STORE_ADMIN_TOKEN_SIGN_ROUTE=bits-store-admin-token-sign`; then `make
+   store-up` and `docker compose up -d bits-console-backend`. Until both are set the
+   console has no Store page.
 
 ## Read tokens
 

@@ -260,6 +260,11 @@ services:
       BITS_STORE_BUILD_TOKEN_SIGN_ROUTE: "${BITS_STORE_BUILD_TOKEN_SIGN_ROUTE:-}"
       BITS_STORE_BUILD_TOKEN_KID: "${BITS_STORE_BUILD_TOKEN_KID:-builds-1}"
       BITS_STORE_BUILD_TOKEN_MAX_TTL: "${BITS_STORE_BUILD_TOKEN_MAX_TTL:-86400}"
+      # ... and bits-store's admin API (the Store page, overall admins): its address on
+      # store-admin-net and the admin tokens' route; off until both are set.
+      BITS_STORE_ADMIN_URL: "${BITS_STORE_ADMIN_URL:-}"
+      BITS_STORE_ADMIN_TOKEN_SIGN_ROUTE: "${BITS_STORE_ADMIN_TOKEN_SIGN_ROUTE:-}"
+      BITS_STORE_ADMIN_TOKEN_KID: "${BITS_STORE_ADMIN_TOKEN_KID:-admin-1}"
       # Orchestrator database, shared with bits-orchestrator (which owns and
       # migrates it); the API writes only action requests and approvals.
       BITS_ORCH_DB: /orch/orch.db
@@ -329,6 +334,7 @@ services:
       - services-net
       - cred-net
       - token-net
+      - store-admin-net         # bits-store's admin API (BITS_STORE_ADMIN_URL)
     healthcheck:
       test: ["CMD", "python3", "-c", "import ssl,urllib.request; urllib.request.urlopen('https://127.0.0.1:8443/healthz', context=ssl._create_unverified_context())"]
       interval: 30s
@@ -480,7 +486,10 @@ services:
     image: bits-services/bits-store:${BITS_STORE_VERSION:-v0.6.0}
     profiles:
       - bits-store
-    command: ["-config", "/etc/bits-store/config.json", "-listen", ":8098", "-data", "/var/lib/bits-store"]
+    # -admin-listen: the admin API (admin keys' tokens only), bound to its address on
+    # store-admin-net alone (a name binds one address), never its other networks'
+    command: ["-config", "/etc/bits-store/config.json", "-listen", ":8098", "-data", "/var/lib/bits-store",
+              "-admin-listen", "bits-store-admin:8099"]
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -509,9 +518,12 @@ services:
     ports:
       - "127.0.0.1:${BITS_STORE_PORT:-8098}:8098"
     networks:
-      - bits-store-net
-      - store-metrics-net       # its /metrics, for vmagent
-      - restricted-sign-net     # the signer's route
+      bits-store-net:
+      store-metrics-net:        # its /metrics, for vmagent
+      restricted-sign-net:      # the signer's route
+      store-admin-net:          # its admin API, for the backend alone
+        aliases:
+          - bits-store-admin
 
   # TLS in front of bits-store, the build hosts' way in (DEPLOYMENT.md, "The store
   # service"): by path, so that one name's requests reach one instance; the
@@ -797,6 +809,11 @@ networks:
   # bits-store <-> the store-token signer, for the /restricted builds' signatures.
   # Internal: no way in or out.
   restricted-sign-net:
+    driver: bridge
+    internal: true
+  # The backend <-> bits-store's admin API (plain HTTP, admin tokens). Internal:
+  # no way in or out, nothing else on it.
+  store-admin-net:
     driver: bridge
     internal: true
   # vmagent <-> bits-store's /metrics. Internal: no way in or out.
