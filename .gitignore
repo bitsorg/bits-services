@@ -12,6 +12,9 @@ secrets/
 *.key
 *.pem
 
+# The store's collection plans and what was applied (make store-gc-plan).
+gc-plans/
+
 # Build / runtime scratch.
 venv/
 .make/

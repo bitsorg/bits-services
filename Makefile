@@ -6,7 +6,7 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help init config build audit-token up down ps status logs unlock secret store-token-key store-build-token-key restricted-sign-key credentials-check helper-unit helper-install admin-install admin-up admin-code admin-reset store-up store-gc test clean monitoring monitoring-check
+.PHONY: help init config build audit-token up down ps status logs unlock secret store-token-key store-build-token-key restricted-sign-key credentials-check helper-unit helper-install admin-install admin-up admin-code admin-reset store-up store-gc store-gc-plan store-gc-apply test clean monitoring monitoring-check
 
 # The monitoring stack (Phase 4), started on its own by `make monitoring`.
 MON_SERVICES := victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
@@ -93,6 +93,20 @@ store-up:  ## Build and start bits-store and its TLS proxy (DEPLOYMENT.md, "The 
 
 store-gc:  ## Plan a collection of the store's packages no manifest keeps (DEPLOYMENT.md, "The store service"); deletes nothing; ARGS=-gc-list names them
 	$(COMPOSE) --profile bits-store run --rm --no-deps bits-store -gc -config /etc/bits-store/config.json -data /var/lib/bits-store $(ARGS)
+
+# ARGS before the plan file's flag: the last of a flag given twice wins.
+GC_RUN = $(COMPOSE) --profile bits-store run --rm --no-deps -v $(CURDIR)/gc-plans:/gc$(1) bits-store \
+	-gc -config /etc/bits-store/config.json -data /var/lib/bits-store $(ARGS)
+
+store-gc-plan:  ## As store-gc, and write what may go to gc-plans/plan-<time>.json, for review; deletes nothing
+	install -d -m 1777 gc-plans
+	@f=plan-$$(date -u +%Y%m%dT%H%M%SZ).json; echo "plan: gc-plans/$$f"; \
+		$(call GC_RUN,) -gc-out /gc/$$f
+
+store-gc-apply:  ## Delete what PLAN=gc-plans/<file> names and a new plan (the same ARGS) still sweeps; logged in gc-plans/applied.log
+	@case "$(PLAN)" in gc-plans/*/*) false ;; gc-plans/plan-*.json) test -f "$(PLAN)" ;; *) false ;; esac || \
+		{ echo "PLAN=gc-plans/plan-<time>.json, from make store-gc-plan" >&2; exit 1; }
+	bash -o pipefail -c '{ echo "== $$(date -u +%FT%TZ) $(PLAN)"; $(call GC_RUN,:ro) -gc-apply /gc/$(notdir $(PLAN)) 2>&1; } | tee -a gc-plans/applied.log'
 
 test:  ## Functional wiring check (proxy up, backend https/healthz, backend→proxy)
 	bash scripts/functional-test.sh

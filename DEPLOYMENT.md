@@ -499,6 +499,17 @@ an old listing, manifests unread, the common manifests changed since read), whil
 have been counted for less than 30 days (from v0.5.0), or when more than a quarter of an
 architecture's packages would go; `bits-store -gc` in bits-store's README.
 
+Deleting is two steps, from bits-store v0.5.3. `make store-gc-plan` (the same `ARGS`)
+writes what may go to `gc-plans/plan-<time>.json` (gitignored; none of a refused
+volume's) and deletes nothing. Read it, then `make store-gc-apply
+PLAN=gc-plans/plan-<time>.json` (the same `ARGS`, within 7 days) plans again and
+deletes those of its files the new plan still sweeps, unchanged since (size and ETag,
+in the index and the bucket) and not read since; the others stay, each said. The
+private bucket's builds are planned too, per group (no manifest certifies them). A
+deletion is final; each is appended to `gc-plans/applied.log`. Exit 2: a volume
+refused or stopped (or a flag `bits-store` does not know); 1: the plan file not
+taken, or a file not deleted. A deleted build asked for later is rebuilt.
+
 ## Store tokens
 
 The console gives store tokens to `bits login` and its own pages. They are signed by
