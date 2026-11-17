@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The store's configuration for bits-admin (ADR bits-services 0004, K): bits-store's
 config.json, the names of the keys in secrets/bits-store.env (never their values) and
-the console's store-token keys (people's and build jobs'). A change is checked by bits-store itself (-check) before
+the console's store-token keys (people's, build jobs' and the admin API's). A change is checked by bits-store itself (-check) before
 it is written; the running store reloads config.json, new keys need make store-up.
 
     tools/site_store.py       # the JSON the host helper hands bits-admin
@@ -29,6 +29,7 @@ NAME = re.compile(r"BITS_STORE_[A-Z0-9_]{1,52}")
 MAX_CONFIG, MAX_VALUE = 128 * 1024, 4096  # a request to the helper holds both
 SIGNER, ROUTE, PREFIX = "store-token-signer", "bits-store-token-sign", "/sign/store"
 BUILD_ROUTE, BUILD_PREFIX = "bits-store-build-token-sign", "/sign/store-build"
+ADMIN_ROUTE, ADMIN_PREFIX = "bits-store-admin-token-sign", "/sign/store-admin"
 # Run inside the signer's container: its gate token never leaves it.
 PUBKEY = r"""
 import base64, json, subprocess, sys, urllib.request
@@ -89,12 +90,18 @@ def collect():
         config = None
     return {"config": config, "path": os.path.relpath(config_path(), DIR), "credentials": sorted(creds),
             "base": base, "console_key": console_key(),
-            "build_key": console_key(BUILD_ROUTE, BUILD_PREFIX), "build_kid": build_kid()}
+            "build_key": console_key(BUILD_ROUTE, BUILD_PREFIX), "build_kid": build_kid(),
+            "admin_key": console_key(ADMIN_ROUTE, ADMIN_PREFIX), "admin_kid": admin_kid()}
 
 
 def build_kid():
     """The id bits-store knows the build key by: the backend's, from .env."""
     return unlocking._env_file().get("BITS_STORE_BUILD_TOKEN_KID") or "builds-1"
+
+
+def admin_kid():
+    """The id bits-store knows the admin key by: the backend's, from .env."""
+    return unlocking._env_file().get("BITS_STORE_ADMIN_TOKEN_KID") or "admin-1"
 
 
 def _named(config):

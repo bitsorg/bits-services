@@ -6,12 +6,14 @@
     tools/unlocking.py store-token-key
     tools/unlocking.py store-build-token-key
     tools/unlocking.py restricted-sign-key
+    tools/unlocking.py store-admin-token-key
 
 decrypts the signing key on the host (the passphrase read from the terminal) and
 pushes the raw seed into the running security proxy's ingest socket, then reads
 the loaded key's id back through its sign route. Nothing touches disk. The store
-tokens' keys and the /restricted builds' (store-token-key, store-build-token-key,
-restricted-sign-key: made once, same passphrase) go in with it.
+tokens' keys, the /restricted builds' and the store admin tokens' (store-token-key,
+store-build-token-key, restricted-sign-key, store-admin-token-key: made once, same
+passphrase) go in with it.
 """
 
 import base64
@@ -41,6 +43,9 @@ BUILD_KEY = os.path.join(DIR, "secrets", "bits-store-build-token-key.enc.pem")
 # ... and bits-store's, signing the builds it keeps in /restricted: a route of its own there.
 RESTRICTED_SLOT = "bits-restricted-sign-key"
 RESTRICTED_KEY = os.path.join(DIR, "secrets", "bits-restricted-sign-key.enc.pem")
+# ... and the admin tokens of bits-store's admin API (the console's Store page).
+ADMIN_SLOT = "bits-store-admin-token-key"
+ADMIN_KEY = os.path.join(DIR, "secrets", "bits-store-admin-token-key.enc.pem")
 SECRETS_FILE = os.environ.get("SERVICE_SECRETS", os.path.join(DIR, "secrets", "service-secrets.enc"))
 CRED_PROXY = os.environ.get("CREDENTIALS_PROXY_SERVICE", "credentials-proxy")
 # The store writer (M8a): the store's keypair goes there, out of the backend's reach.
@@ -115,12 +120,12 @@ def signing_key_id(service=SIGNER, route=SIGN_ROUTE):
 
 
 def unlock_signer(passphrase, enc_path=SIGN_KEY, store_path=STORE_KEY, build_path=BUILD_KEY,
-                  restricted_path=RESTRICTED_KEY):
+                  restricted_path=RESTRICTED_KEY, admin_path=None):
     """Decrypts and pushes the signing key, and the store-token signer's keys there
     are; returns (what the proxy said, key id)."""
     seeds = [(SIGN_SLOT, decrypt_signing_seed(enc_path, passphrase), SIGNER)]  # all, before pushing
     for slot, path in ((STORE_SLOT, store_path), (BUILD_SLOT, build_path),
-                       (RESTRICTED_SLOT, restricted_path)):
+                       (RESTRICTED_SLOT, restricted_path), (ADMIN_SLOT, admin_path or ADMIN_KEY)):
         if os.path.isfile(path):
             seeds.append((slot, decrypt_signing_seed(path, passphrase), STORE_SIGNER))
     said = ""
@@ -334,18 +339,19 @@ def main(argv):
               "restricted/ of a $BITS_TRUST_KEYS directory on the build hosts), then make unlock:\n%s"
               % (RESTRICTED_KEY, kid, pem), end="")
         return
-    if argv[:1] in (["store-token-key"], ["store-build-token-key"]):
-        build = argv[0] == "store-build-token-key"
-        path = BUILD_KEY if build else STORE_KEY
+    if argv[:1] in (["store-token-key"], ["store-build-token-key"], ["store-admin-token-key"]):
+        # (its file, the backend's setting for its id, that id by default, the signer bits-store knows it as)
+        path, kid_var, kid, signer = {
+            "store-token-key": (STORE_KEY, "BITS_STORE_TOKEN_KID", "console-1", "user"),
+            "store-build-token-key": (BUILD_KEY, "BITS_STORE_BUILD_TOKEN_KID", "builds-1", "build"),
+            "store-admin-token-key": (ADMIN_KEY, "BITS_STORE_ADMIN_TOKEN_KID", "admin-1", "admin")}[argv[0]]
         try:
             pub = store_token_key(getpass.getpass("Signing key passphrase: ").encode(), path)
         except UnlockError as e:
             sys.exit(str(e))
-        kid = (_env_file().get("BITS_STORE_BUILD_TOKEN_KID") or "builds-1" if build else
-               _env_file().get("BITS_STORE_TOKEN_KID") or "console-1")
         print("%s: in bits-store's config.json, under \"keys\":\n  \"%s\": "
               "{\"x\": \"%s\", \"signer\": \"%s\"}\nthen make unlock"
-              % (path, kid, pub, "build" if build else "user"))
+              % (path, _env_file().get(kid_var) or kid, pub, signer))
         return
     if not argv or argv[0] != "unlock-signer":
         sys.exit(__doc__.split("\n\n")[1])

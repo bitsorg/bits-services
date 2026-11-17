@@ -6,7 +6,7 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help init config build audit-token up down ps status logs unlock secret store-token-key store-build-token-key restricted-sign-key credentials-check helper-unit helper-install admin-install admin-up admin-code admin-reset store-up store-gc store-gc-plan store-gc-apply test clean monitoring monitoring-check
+.PHONY: help init config build audit-token up down ps status logs unlock secret store-token-key store-build-token-key restricted-sign-key store-admin-token-key credentials-check helper-unit helper-install admin-install admin-up admin-code admin-reset store-up store-gc store-gc-plan store-gc-apply test clean monitoring monitoring-check
 
 # The monitoring stack (Phase 4), started on its own by `make monitoring`.
 MON_SERVICES := victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
@@ -87,6 +87,9 @@ store-build-token-key:  ## The build jobs' store tokens' key, as store-token-key
 
 restricted-sign-key:  ## The key bits-store signs /restricted builds with, as store-token-key; prints it for bits
 	python3 tools/unlocking.py restricted-sign-key
+
+store-admin-token-key:  ## The key of bits-store's admin tokens (the console's Store page), as store-token-key
+	python3 tools/unlocking.py store-admin-token-key
 
 store-up:  ## Build and start bits-store and its TLS proxy (DEPLOYMENT.md, "The store service"), wait until healthy
 	$(COMPOSE) --profile bits-store up -d --build --wait bits-store bits-store-proxy

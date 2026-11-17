@@ -46,8 +46,11 @@ class UnlockingTest(unittest.TestCase):
         self.real, self.fake = ul._compose, FakeCompose()
         ul._compose = self.fake
         self.tmp = tempfile.TemporaryDirectory()
+        self.admin = mock.patch.object(ul, "ADMIN_KEY", os.path.join(self.tmp.name, "no-admin-key"))
+        self.admin.start()                  # never the checkout's own
 
     def tearDown(self):
+        self.admin.stop()
         ul._compose = self.real
         self.tmp.cleanup()
 
@@ -127,6 +130,36 @@ class UnlockingTest(unittest.TestCase):
         ul.unlock_signer(b"test-pass", path, store, os.path.join(self.tmp.name, "none"))
         self.assertNotIn("bits-store-build-token-key",
                          [a[a.index("push") + 1] for a, _ in self.fake.calls if "push" in a])
+
+    def test_the_admin_tokens_key(self):
+        path, _ = self.key()
+        admin = os.path.join(self.tmp.name, "admin.enc.pem")
+        pub = ul.store_token_key(b"test-pass", admin, path)
+        self.fake.running = ("store-token-signer",)
+        none = os.path.join(self.tmp.name, "none")
+        ul.unlock_signer(b"test-pass", path, none, none, none, admin)
+        pushed = {a[a.index("push") + 1]: a[2] for a, _ in self.fake.calls if "push" in a}
+        self.assertEqual(pushed, {"bits-sign-key": "security-proxy",
+                                  "bits-store-admin-token-key": "store-token-signer"})
+        out = io.StringIO()
+        def made(_, p):
+            self.assertEqual(p, ul.ADMIN_KEY)                           # its own key, no other
+            return pub
+        with mock.patch.object(ul, "store_token_key", made), \
+             mock.patch.object(ul, "_env_file", lambda: {}), \
+             mock.patch.object(ul.getpass, "getpass", lambda *a: "test-pass"), \
+             contextlib.redirect_stdout(out):
+            ul.main(["store-admin-token-key"])
+        self.assertIn('"admin-1": {"x": "%s", "signer": "admin"}' % pub, out.getvalue())
+        for cmd, env, want in (("store-token-key", {"BITS_STORE_TOKEN_KID": "console-2"}, '"console-2": {"x": "P", "signer": "user"}'),
+                               ("store-build-token-key", {}, '"builds-1": {"x": "P", "signer": "build"}')):
+            out = io.StringIO()
+            with mock.patch.object(ul, "store_token_key", lambda *a: "P"), \
+                 mock.patch.object(ul, "_env_file", lambda: env), \
+                 mock.patch.object(ul.getpass, "getpass", lambda *a: "test-pass"), \
+                 contextlib.redirect_stdout(out):
+                ul.main([cmd])
+            self.assertIn(want, out.getvalue())
 
     def test_the_restricted_builds_key(self):
         import base64

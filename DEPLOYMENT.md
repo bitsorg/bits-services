@@ -603,6 +603,21 @@ sha256, its object's `sha256` metadata (`aws s3api head-object` of
 delete the object, so that a rebuild can be stored; hosts that downloaded it keep
 their copy until removed there.
 
+### The admin API's key
+
+bits-store's admin API (from v0.6.0: its own listener, never through
+bits-store-proxy) takes short admin tokens, for the console's Store page, signed with
+a key of their own on a fourth route of the same signer; bits-store takes them for
+nothing else. An older bits-store refuses a configuration with an `admin` key:
+
+1. The signer's `config.json` gets the `bits-store-admin-token-sign` route of
+   `security-proxy/store-token-signer.sample.json`; `docker compose --profile
+   store-tokens up -d store-token-signer` (recreated: its keys are gone until `make
+   unlock`).
+2. `make store-admin-token-key`: makes the key once and prints its public key; put it
+   in the store's `config.json` under `"keys"` as shown (`"signer": "admin"`, id
+   `admin-1`); then `make unlock` (`pushed slot 'bits-store-admin-token-key'`).
+
 ## Read tokens
 
 Scripts and agents read build failures, builds and the help chat's records (its votes and

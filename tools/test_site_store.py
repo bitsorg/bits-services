@@ -68,6 +68,11 @@ class SiteStoreTest(unittest.TestCase):
                          (CONFIG, ["BITS_STORE_V_AK", "BITS_STORE_V_SK"], "B" * 43))
         self.assertNotIn("secret-value", json.dumps(got))
         self.assertEqual((got["build_key"], got["build_kid"]), ("B" * 43, "builds-1"))
+        self.assertEqual((got["admin_key"], got["admin_kid"]), ("B" * 43, "admin-1"))
+        with mock.patch.object(ss.unlocking, "_env_file", lambda: {"BITS_STORE_ADMIN_TOKEN_KID": "admin-2"}):
+            self.assertEqual(ss.admin_kid(), "admin-2")
+        self.assertIn(["bits-store-admin-token-sign", "/sign/store-admin"],
+                      [c[0][5:7] for c in self.docker.calls if "exec" in c[0]])
         with mock.patch.object(ss.unlocking, "_env_file", lambda: {"BITS_STORE_BUILD_TOKEN_KID": "builds-2"}):
             self.assertEqual(ss.build_kid(), "builds-2")                # the backend's own
         self.assertIn(["bits-store-build-token-sign", "/sign/store-build"],
