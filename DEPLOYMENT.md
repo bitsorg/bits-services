@@ -595,6 +595,14 @@ builds on their hosts. With the socket, bits-store could also sign store tokens,
 which it is the one to check anyway; the backend could sign restricted builds too, as
 it can already have bits-store sign any upload with a build token it mints.
 
+A bad restricted build stays signed: withdraw it (bits-store v0.5.4 or later) by its
+sha256, its object's `sha256` metadata (`aws s3api head-object` of
+`TARS/<community>/<arch>/store/<h2>/<hash>/<file>`), in the binding's `deny`:
+`"deny": ["sha256:<hex>"]`, read when `config.json` changes. Reads then find none
+(bits rebuilds it) and uploads of those bytes are refused, never signed again. Then
+delete the object, so that a rebuild can be stored; hosts that downloaded it keep
+their copy until removed there.
+
 ## Read tokens
 
 Scripts and agents read build failures, builds and the help chat's records (its votes and
