@@ -611,8 +611,8 @@ a key of their own on a fourth route of the same signer; bits-store takes them f
 nothing else. An older bits-store refuses a configuration with an `admin` key:
 
 1. The signer's `config.json` gets the `bits-store-admin-token-sign` route of
-   `security-proxy/store-token-signer.sample.json`; `docker compose --profile
-   store-tokens up -d store-token-signer` (recreated: its keys are gone until `make
+   `security-proxy/store-token-signer.sample.json`; `docker compose restart
+   store-token-signer` (it reads its routes at start; its keys are gone until `make
    unlock`).
 2. `make store-admin-token-key`: makes the key once and prints its public key; put it
    in the store's `config.json` under `"keys"` as shown (`"signer": "admin"`, id
