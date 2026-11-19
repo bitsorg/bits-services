@@ -435,7 +435,7 @@ set up.
 bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
 and write the store's volumes through short-lived presigned URLs, so no client holds
 storage keys. It is built from a release of bits-store, by its tag
-(`BITS_STORE_VERSION`, v0.7.2; a tag is never moved: a fix is a new release;
+(`BITS_STORE_VERSION`, v0.8.0; a tag is never moved: a fix is a new release;
 `BITS_STORE_SRC=../bits-store` with `BITS_STORE_VERSION=dev` builds a checkout
 instead), and is off unless started:
 
@@ -646,6 +646,25 @@ A check, twice: the second download comes from the bucket.
 
     pip download --no-deps -d /tmp/pypi-check \
         --index-url "https://<this host>:8444/pypi/simple" six
+
+### Git sources
+
+From bits-store v0.8.0 a `git` binding mirrors git repositories: `/git/<host>/<path>`
+is `https://<host>/<path>`. Each repository is a partial mirror in the store's data
+volume (`bits-store-data`, under `git/`), filled from upstream by what builds ask
+for, a tag at once; a tag held never moves. bits sends its clones and fetches there
+(`store.git`). bits-store's `config.json` gets, beside what it has:
+
+    "bindings": [{"prefix": "/git", "volume": "<the volume /store is on>", "key_prefix": "GIT",
+                  "format": "git", "public": true}],
+    "fetch": {"trusted": [..., "github.com", "gitlab.com", "cern.ch"]}
+
+then `make store-up` (a new image: git in it). Repositories of hosts outside
+`trusted` count against the day's fetch budgets when first mirrored. A check, twice
+(the second from the store):
+
+    git clone --bare --filter=tree:0 https://<this host>:8444/git/github.com/madler/zlib /tmp/z.git
+    git -C /tmp/z.git fetch --filter=tree:0 origin refs/tags/v1.3.1:refs/tags/v1.3.1
 
 ## Read tokens
 
