@@ -635,7 +635,8 @@ so pip installs stay the same when the index drops a file or is down. bits-store
 token) and the files' host among the trusted ones, else beyond the day's fetch budget
 a file is only passed on, not kept; then `make store-up`:
 
-    "bindings": [{"prefix": "/pypi", "volume": "cern-s3", "key_prefix": "PYPI", "format": "pypi"}],
+    "bindings": [{"prefix": "/pypi", "volume": "<the volume /store is on>", "key_prefix": "PYPI",
+                  "format": "pypi"}],
     "fetch": {"trusted": [..., "pypi.org", "pythonhosted.org"]}
 
 Store tokens from bits-console (a group admin's and a build's) read `/pypi/**`. A
