@@ -435,7 +435,7 @@ set up.
 bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
 and write the store's volumes through short-lived presigned URLs, so no client holds
 storage keys. It is built from a release of bits-store, by its tag
-(`BITS_STORE_VERSION`, v0.7.1; a tag is never moved: a fix is a new release;
+(`BITS_STORE_VERSION`, v0.7.2; a tag is never moved: a fix is a new release;
 `BITS_STORE_SRC=../bits-store` with `BITS_STORE_VERSION=dev` builds a checkout
 instead), and is off unless started:
 
@@ -630,20 +630,22 @@ nothing else. An older bits-store refuses a configuration with an `admin` key:
 From bits-store v0.7.0 a `pypi` binding mirrors a Python package index (PyPI unless
 `index` names another, by https): a project's page comes from the index, and each
 file is kept in the store on its first read, only with the SHA-256 the index lists,
-so pip installs stay the same when the index drops a file or is down. bits-store's
-`config.json` gets, beside what it has, the binding (never public: pip sends a store
-token) and the files' host among the trusted ones, else beyond the day's fetch budget
-a file is only passed on, not kept; then `make store-up`:
+so pip installs stay the same when the index drops a file or is down. From v0.7.2
+it is public, so builds give pip no store token (theirs can write): anyone who
+reaches the store reads it, and a first read has the file fetched. Its files are
+read by plain URLs, as `/store`'s, so the bucket's public reads must cover `PYPI/`.
+bits-store's `config.json` gets, beside what it has, the binding and the files' host
+among the trusted ones, else beyond the day's fetch budget a file is only passed on,
+not kept; then `make store-up`:
 
     "bindings": [{"prefix": "/pypi", "volume": "<the volume /store is on>", "key_prefix": "PYPI",
-                  "format": "pypi"}],
+                  "format": "pypi", "public": true}],
     "fetch": {"trusted": [..., "pypi.org", "pythonhosted.org"]}
 
-Store tokens from bits-console (a group admin's and a build's) read `/pypi/**`. A
-check, with such a token in `TOKEN`:
+A check, twice: the second download comes from the bucket.
 
     pip download --no-deps -d /tmp/pypi-check \
-        --index-url "https://bits:$TOKEN@<this host>:8444/pypi/simple" six
+        --index-url "https://<this host>:8444/pypi/simple" six
 
 ## Read tokens
 
