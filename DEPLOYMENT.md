@@ -435,7 +435,7 @@ set up.
 bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
 and write the store's volumes through short-lived presigned URLs, so no client holds
 storage keys. It is built from a release of bits-store, by its tag
-(`BITS_STORE_VERSION`, v0.8.8; a tag is never moved: a fix is a new release;
+(`BITS_STORE_VERSION`, v0.8.9; a tag is never moved: a fix is a new release;
 `BITS_STORE_SRC=../bits-store` with `BITS_STORE_VERSION=dev` builds a checkout
 instead), and is off unless started:
 
@@ -643,6 +643,15 @@ report shows overall admins where each package is kept: its build, sources, pip 
 and git origin, opening the Store page at each. The backend asks with admin tokens
 allowed `POST /_admin/where`, which an older bits-store refuses: the report then
 leaves that view out. Nothing to configure.
+
+From bits-store v0.8.9 (with bits of the same day) uploads by people stay possible,
+and their uploaders are named. A read by hash says who uploaded the build
+(`Bits-Object-By`), and a build that keeps an object someone else uploaded records
+them (`stored_by`). The certified manifests then carry each package's approval
+chain, signed: who uploaded it, then who certified each BOM listing it. The Store's
+Packages page lists the builds uploaded by people, and a CLI pre-approval shows them
+and binds who uploaded each. Nothing to configure; with an older bits-store the
+builds record `unknown`.
 
 ### Python packages (pip)
 
