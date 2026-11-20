@@ -435,7 +435,7 @@ set up.
 bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
 and write the store's volumes through short-lived presigned URLs, so no client holds
 storage keys. It is built from a release of bits-store, by its tag
-(`BITS_STORE_VERSION`, v0.8.6; a tag is never moved: a fix is a new release;
+(`BITS_STORE_VERSION`, v0.8.7; a tag is never moved: a fix is a new release;
 `BITS_STORE_SRC=../bits-store` with `BITS_STORE_VERSION=dev` builds a checkout
 instead), and is off unless started:
 
@@ -629,6 +629,14 @@ nothing else. An older bits-store refuses a configuration with an `admin` key:
 4. The page's history (growth, traffic) comes from this host's VictoriaMetrics, which
    the backend reaches on the internal `metrics-query-net` (`BITS_METRICS_URL`, by
    default `http://victoriametrics:8428`; set it empty to leave the charts out).
+
+From bits-store v0.8.7 (with bits' console backend of the same day) the Store's pages
+also list the most read and newest files, the mirrored git repositories, the fetches
+from upstream by host and the archives added by hand. Its first start moves the index
+to layout 7 (two columns added, at once); an older bits-store started on it drops the
+index and lists the buckets anew, and `make store-gc` waits for that first start. An
+upload now carries its token's subject in the object's metadata (`bits-by`, as a fill
+carries `fetched-by`), seen by whoever reads the object.
 
 ### Python packages (pip)
 
