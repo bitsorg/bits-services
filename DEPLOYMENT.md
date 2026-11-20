@@ -435,7 +435,7 @@ set up.
 bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
 and write the store's volumes through short-lived presigned URLs, so no client holds
 storage keys. It is built from a release of bits-store, by its tag
-(`BITS_STORE_VERSION`, v0.8.7; a tag is never moved: a fix is a new release;
+(`BITS_STORE_VERSION`, v0.8.8; a tag is never moved: a fix is a new release;
 `BITS_STORE_SRC=../bits-store` with `BITS_STORE_VERSION=dev` builds a checkout
 instead), and is off unless started:
 
@@ -637,6 +637,12 @@ to layout 7 (two columns added, at once); an older bits-store started on it drop
 index and lists the buckets anew, and `make store-gc` waits for that first start. An
 upload now carries its token's subject in the object's metadata (`bits-by`, as a fill
 carries `fetched-by`), seen by whoever reads the object.
+
+From bits-store v0.8.8 (with bits' console backend of the same day) a build's SBOM
+report shows overall admins where each package is kept: its build, sources, pip file
+and git origin, opening the Store page at each. The backend asks with admin tokens
+allowed `POST /_admin/where`, which an older bits-store refuses: the report then
+leaves that view out. Nothing to configure.
 
 ### Python packages (pip)
 
