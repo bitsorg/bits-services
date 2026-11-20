@@ -435,7 +435,7 @@ set up.
 bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
 and write the store's volumes through short-lived presigned URLs, so no client holds
 storage keys. It is built from a release of bits-store, by its tag
-(`BITS_STORE_VERSION`, v0.8.5; a tag is never moved: a fix is a new release;
+(`BITS_STORE_VERSION`, v0.8.6; a tag is never moved: a fix is a new release;
 `BITS_STORE_SRC=../bits-store` with `BITS_STORE_VERSION=dev` builds a checkout
 instead), and is off unless started:
 
@@ -624,7 +624,7 @@ nothing else. An older bits-store refuses a configuration with an `admin` key:
    `BITS_STORE_ADMIN_TOKEN_SIGN_ROUTE=bits-store-admin-token-sign`; then `make
    store-up` and `docker compose up -d bits-console-backend bits-orchestrator`. Until
    both are set the console has no Store page, and the store's problems (from
-   v0.8.5: its warnings and errors) are not read: the orchestrator reads them every 5
+   v0.8.6: its warnings and errors) are not read: the orchestrator reads them every 5
    minutes, as issues beside the builds' failures (`/ops/issues`, source `store`).
 
 ### Python packages (pip)
@@ -649,9 +649,27 @@ A check, twice: the second download comes from the bucket.
     pip download --no-deps -d /tmp/pypi-check \
         --index-url "https://<this host>:8444/pypi/simple" six
 
+### Rust crates
+
+From bits-store v0.8.6 a `crates` binding mirrors crates.io's registry for cargo:
+each crate a build downloads (a Rust package, or a pip package built from its sdist)
+is kept in the store, checked against the checksum crates.io's index lists. bits
+gives build containers a `/.cargo/config.toml` pointing cargo there (`store.crates`).
+bits-store's `config.json` gets, beside what it has:
+
+    "bindings": [{"prefix": "/crates", "volume": "<the volume /store is on>", "key_prefix": "CRATES",
+                  "format": "crates", "public": true, "url": "https://<the store's host and port>/crates"}],
+    "fetch": {"trusted": [..., "crates.io"]}
+
+`url` is the binding's address as cargo reaches it (its `config.json` points downloads
+there). Being public, its crates are read by plain URLs: `CRATES/` must be public-read
+in the bucket, as `PYPI/` is. A check, once the store runs v0.8.6: its
+`/crates/index/config.json` names that `url` with `/crates` after it, and
+`/crates/index/it/oa/itoa` lists the versions of the crate itoa.
+
 ### Git sources
 
-From bits-store v0.8.5 a `git` binding mirrors git repositories: `/git/<host>/<path>`
+From bits-store v0.8.6 a `git` binding mirrors git repositories: `/git/<host>/<path>`
 is `https://<host>/<path>`. Each repository is a partial mirror in the store's data
 volume (`bits-store-data`, under `git/`), filled from upstream by what builds ask
 for, a tag at once; a tag held never moves. bits sends its clones and fetches there
