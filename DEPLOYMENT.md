@@ -626,6 +626,9 @@ nothing else. An older bits-store refuses a configuration with an `admin` key:
    both are set the console has no Store page, and the store's problems (from
    v0.8.6: its warnings and errors) are not read: the orchestrator reads them every 5
    minutes, as issues beside the builds' failures (`/ops/issues`, source `store`).
+4. The page's history (growth, traffic) comes from this host's VictoriaMetrics, which
+   the backend reaches on the internal `metrics-query-net` (`BITS_METRICS_URL`, by
+   default `http://victoriametrics:8428`; set it empty to leave the charts out).
 
 ### Python packages (pip)
 
