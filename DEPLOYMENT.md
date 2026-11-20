@@ -435,7 +435,7 @@ set up.
 bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
 and write the store's volumes through short-lived presigned URLs, so no client holds
 storage keys. It is built from a release of bits-store, by its tag
-(`BITS_STORE_VERSION`, v0.8.1; a tag is never moved: a fix is a new release;
+(`BITS_STORE_VERSION`, v0.8.2; a tag is never moved: a fix is a new release;
 `BITS_STORE_SRC=../bits-store` with `BITS_STORE_VERSION=dev` builds a checkout
 instead), and is off unless started:
 
@@ -649,7 +649,7 @@ A check, twice: the second download comes from the bucket.
 
 ### Git sources
 
-From bits-store v0.8.1 a `git` binding mirrors git repositories: `/git/<host>/<path>`
+From bits-store v0.8.2 a `git` binding mirrors git repositories: `/git/<host>/<path>`
 is `https://<host>/<path>`. Each repository is a partial mirror in the store's data
 volume (`bits-store-data`, under `git/`), filled from upstream by what builds ask
 for, a tag at once; a tag held never moves. bits sends its clones and fetches there
