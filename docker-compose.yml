@@ -439,6 +439,15 @@ services:
       BITS_CHAT_EMBED_MODEL: "${BITS_CHAT_EMBED_MODEL:-}"
       # Public-read only (as the backend's): GitHub's listings past 60 an hour.
       BITS_GITHUB_TOKEN: "${BITS_GITHUB_TOKEN:-}"
+      # bits-store's problems (store_problems.py), read with a minute's admin token
+      # from the store-token signer, as the backend's Store page; off until both are set.
+      BITS_STORE_ADMIN_URL: "${BITS_STORE_ADMIN_URL:-}"
+      BITS_STORE_ADMIN_TOKEN_SIGN_ROUTE: "${BITS_STORE_ADMIN_TOKEN_SIGN_ROUTE:-}"
+      BITS_STORE_ADMIN_TOKEN_KID: "${BITS_STORE_ADMIN_TOKEN_KID:-admin-1}"
+      BITS_STORE_TOKEN_SIGN_SOCKET: "${BITS_STORE_TOKEN_SIGN_SOCKET-/run/store-token-signer/agent.sock}"
+      BITS_STORE_TOKEN_SIGN_HOST: "${BITS_STORE_TOKEN_SIGN_HOST:-store-token-signer}"
+      BITS_STORE_TOKEN_ISSUER: "${BITS_STORE_TOKEN_ISSUER:-}"
+      BITS_STORE_TOKEN_AUDIENCE: "${BITS_STORE_TOKEN_AUDIENCE:-}"
     # The host's Ollama, for the embedding model (DEPLOYMENT.md, "The help chat").
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -447,6 +456,7 @@ services:
       - credential-sockets:/run/credentials-proxy:ro
       - signer-sockets:/run/security-proxy:ro            # the signer's agent socket (M8a)
       - store-writer-sockets:/run/store-writer:ro        # the store writer's (M8a)
+      - store-token-signer-sockets:/run/store-token-signer:ro  # bits-store's admin tokens
       # Must be writable by uid 65534 (nobody), the worker's user.
       - ${ORCH_BACKUP_DIR:-./data/orch-backup}:/orch-backup
       # The CA of the audit-log service's certificate, once it runs elsewhere
@@ -465,6 +475,8 @@ services:
       - signer-net        # the signer (M8a); internal, no way out
       - store-net         # the store writer (M8a), only the worker's
       - scan-net          # the sbom-scanner, only the worker's
+      - token-net         # the store-token signer: bits-store's admin tokens
+      - store-admin-net   # bits-store's admin API: its problems
     healthcheck:
       # The worker touches the heartbeat after every pass (default every 30 s).
       test: ["CMD", "python3", "-c", "import os,sys,time; sys.exit(time.time() - os.path.getmtime('/orch/orch.db.heartbeat') > 150)"]
@@ -521,7 +533,7 @@ services:
       bits-store-net:
       store-metrics-net:        # its /metrics, for vmagent
       restricted-sign-net:      # the signer's route
-      store-admin-net:          # its admin API, for the backend alone
+      store-admin-net:          # its admin API, for the backend and the worker
         aliases:
           - bits-store-admin
 

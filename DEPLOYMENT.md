@@ -619,11 +619,13 @@ nothing else. An older bits-store refuses a configuration with an `admin` key:
    `admin-1`, or `BITS_STORE_ADMIN_TOKEN_KID`); then `make unlock` (`pushed slot
    'bits-store-admin-token-key'`).
 3. In `.env`: `BITS_STORE_ADMIN_URL=http://bits-store-admin:8099` (its admin
-   listener, bound to its address on the internal `store-admin-net`, which the backend
-   alone shares) and
+   listener, bound to its address on the internal `store-admin-net`, which only the
+   backend and the orchestrator share) and
    `BITS_STORE_ADMIN_TOKEN_SIGN_ROUTE=bits-store-admin-token-sign`; then `make
-   store-up` and `docker compose up -d bits-console-backend`. Until both are set the
-   console has no Store page.
+   store-up` and `docker compose up -d bits-console-backend bits-orchestrator`. Until
+   both are set the console has no Store page, and the store's problems (from
+   v0.8.5: its warnings and errors) are not read: the orchestrator reads them every 5
+   minutes, as issues beside the builds' failures (`/ops/issues`, source `store`).
 
 ### Python packages (pip)
 
