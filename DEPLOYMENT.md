@@ -435,7 +435,7 @@ set up.
 bits-store (ADR bits-services 0004) checks store tokens and lets their holders read
 and write the store's volumes through short-lived presigned URLs, so no client holds
 storage keys. It is built from a release of bits-store, by its tag
-(`BITS_STORE_VERSION`, v0.8.9; a tag is never moved: a fix is a new release;
+(`BITS_STORE_VERSION`, v0.8.10; a tag is never moved: a fix is a new release;
 `BITS_STORE_SRC=../bits-store` with `BITS_STORE_VERSION=dev` builds a checkout
 instead), and is off unless started:
 
@@ -652,6 +652,11 @@ chain, signed: who uploaded it, then who certified each BOM listing it. The Stor
 Packages page lists the builds uploaded by people, and a CLI pre-approval shows them
 and binds who uploaded each. Nothing to configure; with an older bits-store the
 builds record `unknown`.
+
+bits-store v0.8.10 lists, in a `pypi` binding's pages, an sdist in every archive pip
+unpacks (`.tar.bz2`, `.tar.xz`, ...), not only `.whl`, `.tar.gz` and `.zip`: a release
+published only as `.tar.bz2` (storm 0.23) could not be installed through the store.
+Nothing to configure.
 
 ### Python packages (pip)
 
