@@ -145,8 +145,8 @@ serves it to signed-in users (`GET /ops/monitoring`) from `MONITORING_SNAPSHOT_D
     make up
     # in /etc/bits/push-agent.env:  SNAPSHOT_DIR=/var/lib/bits-monitoring
 
-With `PUSH_TOKEN` left empty push-agent no longer uploads to GitLab's registry, which only
-signed-out browsers read (with the read token).
+push-agent writes there only: its old `GITLAB_URL`, `PROJECT_ID` and `PUSH_TOKEN` lines in
+`push-agent.env` are unused, and that GitLab token can be revoked.
 
 ### Logs and the writers' port (VictoriaLogs, vmauth)
 
