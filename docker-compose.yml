@@ -228,6 +228,9 @@ services:
       # (root members = overall admins; each subgroup path = a community). Needs
       # BITS_ADMIN_RESOLVE_TOKEN to read membership. BITS_ADMINS_POLICY merges on top.
       BITS_ADMINS_GROUP: "${BITS_ADMINS_GROUP:-}"
+      # A community's developers (its logs and failures): a `developers` subgroup of its
+      # admin subgroup, and/or these lines in the admins' format.
+      BITS_DEVELOPERS_POLICY: "${BITS_DEVELOPERS_POLICY:-}"
       # Ops proxy (Phase 1): api-scope project token + the build project id, so the
       # backend can trigger builds on the caller's behalf after authz. Env for now.
       BITS_FORGE_OPS_TOKEN: "${BITS_FORGE_OPS_TOKEN:-}"
