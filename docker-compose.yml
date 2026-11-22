@@ -267,6 +267,8 @@ services:
       BITS_STORE_ADMIN_TOKEN_KID: "${BITS_STORE_ADMIN_TOKEN_KID:-admin-1}"
       # ... and VictoriaMetrics on metrics-query-net (the Store page's history); empty: off.
       BITS_METRICS_URL: "${BITS_METRICS_URL-http://victoriametrics:8428}"
+      # ... and VictoriaLogs on logs-net, for the host journals build jobs send; empty: off.
+      BITS_LOGS_URL: "${BITS_LOGS_URL-http://victorialogs:9428}"
       # Orchestrator database, shared with bits-orchestrator (which owns and
       # migrates it); the API writes only action requests and approvals.
       BITS_ORCH_DB: /orch/orch.db
@@ -338,6 +340,7 @@ services:
       - token-net
       - store-admin-net         # bits-store's admin API (BITS_STORE_ADMIN_URL)
       - metrics-query-net       # VictoriaMetrics' queries (BITS_METRICS_URL)
+      - logs-net                # VictoriaLogs (BITS_LOGS_URL)
     healthcheck:
       test: ["CMD", "python3", "-c", "import ssl,urllib.request; urllib.request.urlopen('https://127.0.0.1:8443/healthz', context=ssl._create_unverified_context())"]
       interval: 30s
@@ -709,10 +712,12 @@ services:
     command:
       - "-storageDataPath=/victoria-logs-data"
       - "-retentionPeriod=${VL_RETENTION:-30d}"
+      - "-retention.maxDiskSpaceUsageBytes=${VL_MAX_DISK:-50GiB}"   # oldest days go first
     volumes:
       - ${MONITORING_DATA_DIR:-./data/monitoring}/vl:/victoria-logs-data
     networks:
       - monitoring-net
+      - logs-net                # the backend writes the journals build jobs send
 
   # The writers' way in, over TLS: a token each (secrets/vmauth/auth.yml), metric imports
   # to VictoriaMetrics and log inserts to VictoriaLogs, nothing else. Its own /metrics,
@@ -873,6 +878,11 @@ networks:
   # The backend <-> VictoriaMetrics, for the Store page's history. Internal: no
   # way in or out, nothing else on it.
   metrics-query-net:
+    driver: bridge
+    internal: true
+  # The backend <-> VictoriaLogs, for the journals build jobs send. Internal: no
+  # way in or out, nothing else on it.
+  logs-net:
     driver: bridge
     internal: true
   # vmagent <-> bits-store's /metrics. Internal: no way in or out.

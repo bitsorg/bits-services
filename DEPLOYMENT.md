@@ -159,6 +159,12 @@ add `--cacert` for a self-signed certificate, and `--trust=` for systemd-journal
       --data-binary '{"_msg":"vmauth test","host":"'"$(hostname -s)"'"}' "https://$H:8427/insert/jsonline?_stream_fields=host"
     docker compose exec victorialogs wget -qO- 'http://localhost:9428/select/logsql/query?query=vmauth'
 
+Build hosts do not use vmauth: runners may be started on demand, with nothing set up
+for them. A build job sends its host's journal to the backend with its CI ID token
+(`POST /ops/ci/logs`), and the backend writes it to VictoriaLogs over `logs-net`
+(`BITS_LOGS_URL`, default `http://victorialogs:9428`; empty: off), each line named by
+the verified token. vmauth's tokens are for the fixed writers (prepub, this host).
+
 A JSON-lines insert needs that content type: curl's default (a form) lets the
 body be read as form fields and nothing is stored. A user's routes are only these,
 so a token cannot query, delete or snapshot. `docker compose kill -s HUP vmauth`
