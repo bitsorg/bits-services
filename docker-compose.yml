@@ -272,6 +272,8 @@ services:
       BITS_METRICS_URL: "${BITS_METRICS_URL-http://victoriametrics:8428}"
       # ... and VictoriaLogs on logs-net, for the host journals build jobs send; empty: off.
       BITS_LOGS_URL: "${BITS_LOGS_URL-http://victorialogs:9428}"
+      # ... and the Monitoring tab's snapshot, which bits-console's push-agent writes there.
+      BITS_MONITORING_SNAPSHOT: "/monitoring-snapshot/snapshot.json"
       # Orchestrator database, shared with bits-orchestrator (which owns and
       # migrates it); the API writes only action requests and approvals.
       BITS_ORCH_DB: /orch/orch.db
@@ -332,6 +334,7 @@ services:
       - ${BACKEND_SIGNER_SOCKETS:-signer-sockets}:/run/security-proxy:ro
       - credential-sockets:/run/credentials-proxy:ro           # credentials proxy's
       - store-token-signer-sockets:/run/store-token-signer:ro  # the store-token signer's
+      - ${MONITORING_SNAPSHOT_DIR:-./data/monitoring-snapshot}:/monitoring-snapshot:ro  # push-agent's
     # gid 10002 = 'bitssign' in the security-proxy image: lets the (nobody) backend
     # connect to the agent socket, nothing else of the proxy's.
     group_add:

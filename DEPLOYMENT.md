@@ -134,6 +134,20 @@ data layout are those the testbed used, so the bits-console push-agent
 (`VM_URL=http://localhost:8428`), the console's `metrics_url` (`:8430`) and the
 CI `METRICS_URL` keep working unchanged.
 
+### The Monitoring tab's snapshot (push-agent)
+
+bits-console's push-agent (`monitoring/push-agent.{sh,service,timer}`, on this host)
+builds the Monitoring tab's snapshot from VictoriaMetrics every minute. The backend
+serves it to signed-in users (`GET /ops/monitoring`) from `MONITORING_SNAPSHOT_DIR`:
+
+    sudo install -d -o gitlab-runner -m 755 /var/lib/bits-monitoring   # push-agent's user
+    echo MONITORING_SNAPSHOT_DIR=/var/lib/bits-monitoring >> .env
+    make up
+    # in /etc/bits/push-agent.env:  SNAPSHOT_DIR=/var/lib/bits-monitoring
+
+With `PUSH_TOKEN` left empty push-agent no longer uploads to GitLab's registry, which only
+signed-out browsers read (with the read token).
+
 ### Logs and the writers' port (VictoriaLogs, vmauth)
 
 VictoriaLogs keeps the operational logs (`MONITORING_DATA_DIR/vl`, `VL_RETENTION`,
