@@ -6,10 +6,10 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help init config build audit-token up down ps status logs unlock secret store-token-key store-build-token-key restricted-sign-key store-admin-token-key credentials-check helper-unit helper-install admin-install admin-up admin-code admin-reset store-up store-gc store-gc-plan store-gc-apply test clean monitoring monitoring-check
+.PHONY: help init config build audit-token up down ps status logs unlock secret store-token-key store-build-token-key restricted-sign-key store-admin-token-key credentials-check helper-unit helper-install admin-install admin-up admin-code admin-reset store-up store-gc store-gc-plan store-gc-apply test clean monitoring monitoring-check vmauth-check
 
 # The monitoring stack (Phase 4), started on its own by `make monitoring`.
-MON_SERVICES := victoriametrics vmagent cadvisor node-exporter vm-cors runner-sd
+MON_SERVICES := victoriametrics victorialogs vmauth vmagent cadvisor node-exporter vm-cors runner-sd
 
 help:  ## Print this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -30,7 +30,7 @@ audit-token:  ## Create the audit-log tokens (secrets/audit_token, secrets/audit
 	@umask 022; test -s secrets/audit-chains/bits-admin/token || { mkdir -p secrets/audit-chains/bits-admin && python3 -c "import secrets; print(secrets.token_urlsafe(32))" > secrets/audit-chains/bits-admin/token && echo "created secrets/audit-chains/bits-admin/token"; } || { echo "cannot write secrets/audit-chains (made by Docker as root?): sudo chown -R $$(id -un) secrets/audit-chains" >&2; exit 1; }
 	@test -d $${AUDIT_DATA_DIR:-./data/audit-log} || echo "create the audit-log data dir: sudo install -d -o 65534 -g 65534 $${AUDIT_DATA_DIR:-./data/audit-log}"
 
-up: audit-token  ## Start services (detached), then check signing (a new proxy needs make unlock)
+up: audit-token vmauth-check  ## Start services (detached), then check signing (a new proxy needs make unlock)
 	$(COMPOSE) up -d
 	-@bash scripts/signing-check.sh --wait 30
 
@@ -114,8 +114,13 @@ store-gc-apply:  ## Delete what PLAN=gc-plans/<file> names and a new plan (the s
 test:  ## Functional wiring check (proxy up, backend https/healthz, backend→proxy)
 	bash scripts/functional-test.sh
 
-monitoring:  ## Start/refresh only the monitoring stack (signer + backend untouched)
+monitoring: vmauth-check  ## Start/refresh only the monitoring stack (signer + backend untouched)
 	$(COMPOSE) up -d $(MON_SERVICES)
+
+# vmauth starts only with its users written, and none left with the example's token.
+vmauth-check:
+	@test -f secrets/vmauth/auth.yml -a -r secrets/vmauth/auth.yml || { echo "secrets/vmauth/auth.yml is missing: DEPLOYMENT.md, Monitoring (vmauth)" >&2; exit 1; }
+	@! grep -q 'REPLACE-WITH' secrets/vmauth/auth.yml || { echo "secrets/vmauth/auth.yml still has the example's REPLACE-WITH values" >&2; exit 1; }
 
 monitoring-check:  ## Scrape targets and whether each is up (1) or down (0)
 	@port=$$(sed -n "s/^\(export \)\{0,1\}VM_HOST_PORT=['\"]*\([0-9]*\).*/\2/p" .env 2>/dev/null | tail -1); \

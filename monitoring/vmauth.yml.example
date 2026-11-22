@@ -1,0 +1,21 @@
+# vmauth users: one per writer (a build host, prepub, the services host), so one can be
+# revoked alone. Copy to secrets/vmauth/auth.yml with real tokens (openssl rand -hex 32);
+# `docker compose kill -s HUP vmauth` reloads it. One tenant (0:0) whatever a writer asks.
+users:
+  - name: pcphsft204
+    bearer_token: "REPLACE-WITH-A-TOKEN"
+    url_map: &writer
+      - src_paths: ["/api/v1/import/prometheus"]
+        url_prefix: "http://victoriametrics:8428"
+      - src_paths: ["/insert/.+"]
+        url_prefix: "http://victorialogs:9428"
+        headers: ["AccountID: 0", "ProjectID: 0"]
+  - name: bits
+    bearer_token: "REPLACE-WITH-ANOTHER-TOKEN"
+    url_map: *writer
+  # systemd-journal-upload sends no bearer token: basic auth in its --url
+  # (https://pcphsft204-journal:<password>@<this host>:8427/insert/journald).
+  - name: pcphsft204-journal
+    username: pcphsft204-journal
+    password: "REPLACE-WITH-A-PASSWORD"
+    url_map: *writer

@@ -701,6 +701,44 @@ services:
       - monitoring-net
       - metrics-query-net       # the backend's queries (the Store page's history)
 
+  # Operational logs (the journals of build hosts, prepub and services), next to the
+  # metrics; written only through vmauth, read on monitoring-net.
+  victorialogs:
+    image: victoriametrics/victoria-logs:v1.53.0
+    restart: unless-stopped
+    command:
+      - "-storageDataPath=/victoria-logs-data"
+      - "-retentionPeriod=${VL_RETENTION:-30d}"
+    volumes:
+      - ${MONITORING_DATA_DIR:-./data/monitoring}/vl:/victoria-logs-data
+    networks:
+      - monitoring-net
+
+  # The writers' way in, over TLS: a token each (secrets/vmauth/auth.yml), metric imports
+  # to VictoriaMetrics and log inserts to VictoriaLogs, nothing else. Its own /metrics,
+  # /-/reload and pprof listen only on monitoring-net (:8426).
+  vmauth:
+    image: victoriametrics/vmauth:v1.155.0
+    restart: unless-stopped
+    command:
+      - "-auth.config=/etc/vmauth/auth.yml"
+      - "-httpListenAddr=:8427"
+      - "-httpInternalListenAddr=:8426"
+      - "-tls"
+      - "-tlsCertFile=/certs/cert.pem"
+      - "-tlsKeyFile=/certs/key.pem"
+      - "-tlsMinVersion=TLS12"
+    volumes:
+      - ./secrets/vmauth:/etc/vmauth:ro
+      - ${TLS_CERT_DIR:?set TLS_CERT_DIR in .env}:/certs:ro    # cert.pem + key.pem
+    ports:
+      - "${VMAUTH_HOST_PORT:-8427}:8427"
+    depends_on:
+      - victoriametrics
+      - victorialogs
+    networks:
+      - monitoring-net
+
   vmagent:
     image: victoriametrics/vmagent:v1.99.0
     restart: unless-stopped

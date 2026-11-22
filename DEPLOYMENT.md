@@ -16,8 +16,9 @@ Status: **stub.** Filled in per phase of the implementation plan
 - `signer-net` — internal-only; the security-proxy and (Phase 3) the
   bits-console backend attach here. Nothing else may reach the signer.
 - `services-net` — backend ↔ public front (web.cern.ch reverse-proxy).
-- `monitoring-net` — the monitoring stack (Phase 4). Publishes only
-  VictoriaMetrics `:8428` and its read-only CORS proxy `:8430`.
+- `monitoring-net` — the monitoring stack (Phase 4). Publishes VictoriaMetrics
+  `:8428`, its CORS proxy `:8430` (the two query endpoints only) and vmauth `:8427`
+  (the writers' port, a token each); VictoriaLogs is not published.
 - The help chat's model is not on a compose network: the backend (and, for the
   embedding model, the worker) reaches Ollama on the host through
   `host.docker.internal` (the docker bridge), see below.
@@ -132,6 +133,38 @@ any testbed run. Services: `victoriametrics`, `vmagent`, `cadvisor`,
 data layout are those the testbed used, so the bits-console push-agent
 (`VM_URL=http://localhost:8428`), the console's `metrics_url` (`:8430`) and the
 CI `METRICS_URL` keep working unchanged.
+
+### Logs and the writers' port (VictoriaLogs, vmauth)
+
+VictoriaLogs keeps the operational logs (`MONITORING_DATA_DIR/vl`, `VL_RETENTION`,
+30 days) and is reached only on monitoring-net. Writers come in through vmauth on
+`:8427`, over TLS with the backend's certificate (`TLS_CERT_DIR`), each with its own
+token (or basic auth, for systemd-journal-upload), and may only import metrics
+(`/api/v1/import/prometheus`) and insert logs (`/insert/...`, always tenant 0:0).
+vmauth's own `/metrics`, `/-/reload` and pprof are on `:8426`, not published.
+Before `make up` or `make monitoring` (both refuse to start without it):
+
+    install -d -m 700 secrets/vmauth
+    cp monitoring/vmauth.yml.example secrets/vmauth/auth.yml   # one user per writer
+    openssl rand -hex 32                                       # a token, per user
+    install -d -m 777 "${MONITORING_DATA_DIR:-./data/monitoring}/vl"
+
+After it, from another host (H: this host's name in its certificate, T: a writer's token;
+add `--cacert` for a self-signed certificate, and `--trust=` for systemd-journal-upload):
+
+    curl -s -o /dev/null -w '%{http_code}\n' --data-binary 'x 1' "https://$H:8427/api/v1/import/prometheus"   # 401
+    curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $T" --data-binary 'bits_vmauth_test 1' \
+      "https://$H:8427/api/v1/import/prometheus"                                                        # 204
+    curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/stream+json' \
+      --data-binary '{"_msg":"vmauth test","host":"'"$(hostname -s)"'"}' "https://$H:8427/insert/jsonline?_stream_fields=host"
+    docker compose exec victorialogs wget -qO- 'http://localhost:9428/select/logsql/query?query=vmauth'
+
+A JSON-lines insert needs that content type: curl's default (a form) lets the
+body be read as form fields and nothing is stored. A user's routes are only these,
+so a token cannot query, delete or snapshot. `docker compose kill -s HUP vmauth`
+reloads `secrets/vmauth/auth.yml`. `:8428` stays published until every writer uses
+`:8427`; until then it also answers deletes and snapshots on a plain GET, so limit
+it to the writers' addresses in the host firewall.
 
 Scrape targets are in `monitoring/scrape.yml`. Other stacks on the host (the
 testbed's prepub and Stratum 1s) are scraped through their published ports via

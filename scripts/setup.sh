@@ -57,7 +57,7 @@ if [[ "$BITS_SRC" == "./bits" && ! -f bits/console-backend/pyproject.toml ]]; th
 if [[ ! -d ali-bot/security-proxy ]]; then _empty+="ali-bot"; fi
 if [[ -n "$_empty" ]]; then warn "empty submodule(s), run: git submodule update --init ${_empty% }"; fi
 # World-writable as in the testbed: the VictoriaMetrics images need not run as you.
-install -d -m 777 "$MONITORING_DATA_DIR/vm" "$MONITORING_DATA_DIR/vmagent"
+install -d -m 777 "$MONITORING_DATA_DIR/vm" "$MONITORING_DATA_DIR/vmagent" "$MONITORING_DATA_DIR/vl"
 
 # ── Derive WebAuthn + CORS ────────────────────────────────────────────────────
 # The passkey ceremony runs on TWO origins: enrolment on the Pages frontend, and
